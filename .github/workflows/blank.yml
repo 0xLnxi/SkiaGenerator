@@ -145,6 +145,13 @@ jobs:
         args="$args skia_use_dng_sdk=false"
         args="$args skia_use_piex=false"
         
+        # 禁用有问题的功能以简化构建
+        args="$args skia_use_harfbuzz=false"
+        args="$args skia_pdf_subset_harfbuzz=false"
+        args="$args skia_enable_pdf=false"
+        args="$args skia_enable_skottie=false"
+        args="$args skia_enable_particles=false"
+        
         # 设置目标平台和架构
         args="$args target_os=\"${{ matrix.target_os }}\""
         args="$args target_cpu=\"${{ matrix.target_cpu }}\""
@@ -153,7 +160,6 @@ jobs:
         case "${{ matrix.target_os }}" in
           "win")
             # Windows平台特定配置 - 让系统自动检测工具链
-            # 不指定具体的Visual Studio路径，让depot_tools自动处理
             if [ "${{ matrix.target_cpu }}" = "arm64" ]; then
               args="$args target_cpu=\"arm64\""
             fi
@@ -245,6 +251,7 @@ jobs:
         架构: ${{ matrix.target_cpu }}
         包名: ${{ matrix.platform }}
         构建模式: Release (官方构建)
+        特性说明: 核心图形功能，不包含PDF支持
         EOF
         
         # 创建使用说明文件
@@ -259,6 +266,19 @@ jobs:
         - lib/ - 静态库文件和动态库文件
         - bin/ - 可执行工具程序
         - BUILD_INFO.txt - 详细构建信息
+
+        ## 构建特性
+
+        此构建包含Skia的核心图形功能：
+        - 2D绘图和渲染
+        - 图像处理和滤镜
+        - 文字渲染
+        - GPU加速渲染（如果平台支持）
+        
+        为了简化构建和减少依赖，此版本不包含：
+        - PDF导出功能
+        - Skottie动画支持
+        - 粒子系统
 
         ## 使用说明
 
@@ -379,6 +399,7 @@ jobs:
         - 构建模式: Release (官方优化构建)
         - 所有依赖: 静态链接，无外部依赖
         - 图形后端: 针对每个平台优化
+        - 特性: 核心图形功能，为了简化构建已禁用PDF支持
 
         ## 使用方法
 
@@ -386,6 +407,15 @@ jobs:
         2. 解压到你的项目目录
         3. 在构建系统中引用include和lib目录
         4. 开始使用Skia API进行图形开发
+
+        ## 注意事项
+
+        此版本为了确保构建稳定性，已禁用以下功能：
+        - PDF导出功能
+        - Skottie动画支持
+        - 粒子系统
+
+        如果需要这些功能，请考虑自行编译完整版本。
         EOF
         
     # 创建GitHub Release发布版本
