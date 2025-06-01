@@ -14,56 +14,56 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Windows x64
+          # Windows x64架构
           - os: windows-latest
             platform: x64_windows
             arch: x64
             target_os: win
             target_cpu: x64
             
-          # Windows ARM64
+          # Windows ARM64架构
           - os: windows-latest
             platform: arm64_windows
             arch: arm64
             target_os: win
             target_cpu: arm64
             
-          # macOS x64
+          # macOS x64架构
           - os: macos-latest
             platform: x64_macos
             arch: x64
             target_os: mac
             target_cpu: x64
             
-          # macOS ARM64
+          # macOS ARM64架构
           - os: macos-latest
             platform: arm64_macos
             arch: arm64
             target_os: mac
             target_cpu: arm64
             
-          # Linux x64
+          # Linux x64架构
           - os: ubuntu-latest
             platform: x64_linux
             arch: x64
             target_os: linux
             target_cpu: x64
             
-          # Linux ARM64
+          # Linux ARM64架构
           - os: ubuntu-latest
             platform: arm64_linux
             arch: arm64
             target_os: linux
             target_cpu: arm64
             
-          # Android x64
+          # Android x64架构
           - os: ubuntu-latest
             platform: x64_android
             arch: x64
             target_os: android
             target_cpu: x64
             
-          # Android ARM64
+          # Android ARM64架构
           - os: ubuntu-latest
             platform: arm64_android
             arch: arm64
@@ -71,14 +71,17 @@ jobs:
             target_cpu: arm64
 
     steps:
+    # 检出代码仓库
     - name: 检出代码仓库
       uses: actions/checkout@v4
       
+    # 设置Python运行环境
     - name: 设置Python环境
       uses: actions/setup-python@v4
       with:
         python-version: '3.x'
         
+    # 安装Linux系统依赖包
     - name: 安装Linux系统依赖
       if: runner.os == 'Linux'
       run: |
@@ -89,35 +92,41 @@ jobs:
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
         fi
         
+    # 安装macOS系统依赖
     - name: 安装macOS系统依赖
       if: runner.os == 'macOS'
       run: |
         # macOS通常已经包含所需的开发工具
         xcode-select --install 2>/dev/null || true
         
+    # 安装Windows系统依赖
     - name: 安装Windows系统依赖
       if: runner.os == 'Windows'
       run: |
-        # Windows通常使用Visual Studio构建工具
+        # Windows使用Visual Studio构建工具
         echo "使用Windows默认构建环境"
         
-    - name: 设置Android NDK (仅Android平台)
+    # 设置Android NDK环境（仅限Android平台）
+    - name: 设置Android NDK
       if: matrix.target_os == 'android'
       uses: nttld/setup-ndk@v1
       with:
         ndk-version: r25c
         
+    # 获取Google的depot_tools工具集
     - name: 获取depot_tools
       run: |
         git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
         echo "${{ github.workspace }}/depot_tools" >> $GITHUB_PATH
       shell: bash
       
-    - name: 设置depot_tools环境变量 (Windows)
+    # 设置Windows系统的depot_tools环境变量
+    - name: 设置depot_tools环境变量
       if: runner.os == 'Windows'
       run: |
         echo "${{ github.workspace }}\depot_tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         
+    # 获取Skia源代码并同步依赖
     - name: 获取Skia源代码
       run: |
         git clone https://skia.googlesource.com/skia.git
@@ -125,11 +134,12 @@ jobs:
         python tools/git-sync-deps
       shell: bash
       
+    # 配置各平台的构建参数
     - name: 配置构建参数
       run: |
         cd skia
         
-        # 基础构建参数
+        # 基础构建参数设置
         args="is_official_build=true"
         args="$args skia_use_system_expat=false"
         args="$args skia_use_system_icu=false"
@@ -144,24 +154,24 @@ jobs:
         args="$args target_os=\"${{ matrix.target_os }}\""
         args="$args target_cpu=\"${{ matrix.target_cpu }}\""
         
-        # 根据平台设置特定参数
+        # 根据不同平台设置特定参数
         case "${{ matrix.target_os }}" in
           "win")
-            # Windows特定配置
+            # Windows平台特定配置
             args="$args clang_win=\"${{ github.workspace }}/depot_tools/win_toolchain\""
             if [ "${{ matrix.target_cpu }}" = "arm64" ]; then
               args="$args target_cpu=\"arm64\""
             fi
             ;;
           "mac")
-            # macOS特定配置
+            # macOS平台特定配置
             args="$args skia_use_metal=true"
             if [ "${{ matrix.target_cpu }}" = "arm64" ]; then
               args="$args target_cpu=\"arm64\""
             fi
             ;;
           "linux")
-            # Linux特定配置
+            # Linux平台特定配置
             if [ "${{ matrix.target_cpu }}" = "arm64" ]; then
               args="$args cc=\"aarch64-linux-gnu-gcc\""
               args="$args cxx=\"aarch64-linux-gnu-g++\""
@@ -169,7 +179,7 @@ jobs:
             fi
             ;;
           "android")
-            # Android特定配置
+            # Android平台特定配置
             args="$args ndk=\"$ANDROID_NDK_ROOT\""
             args="$args skia_use_system_freetype2=false"
             args="$args skia_enable_fontmgr_android=true"
@@ -180,18 +190,21 @@ jobs:
         echo "BUILD_ARGS=$args" >> $GITHUB_ENV
       shell: bash
       
+    # 使用GN生成构建文件
     - name: 生成构建文件
       run: |
         cd skia
         bin/gn gen out/Release --args="$BUILD_ARGS"
       shell: bash
       
+    # 使用Ninja编译Skia
     - name: 编译Skia
       run: |
         cd skia
         ninja -C out/Release
       shell: bash
       
+    # 创建发布包并整理文件
     - name: 创建发布包
       run: |
         cd skia
@@ -202,26 +215,26 @@ jobs:
         mkdir -p package/bin
         mkdir -p package/docs
         
-        # 复制头文件
+        # 复制头文件到包目录
         cp -r include/* package/include/
         
-        # 复制库文件和可执行文件，根据平台类型处理
+        # 根据不同平台复制相应的库文件和可执行文件
         case "${{ matrix.target_os }}" in
           "win")
-            # Windows平台文件
+            # Windows平台文件复制
             find out/Release -name "*.lib" -exec cp {} package/lib/ \; 2>/dev/null || true
             find out/Release -name "*.dll" -exec cp {} package/bin/ \; 2>/dev/null || true
             find out/Release -name "*.exe" -exec cp {} package/bin/ \; 2>/dev/null || true
             ;;
           "mac")
-            # macOS平台文件
+            # macOS平台文件复制
             find out/Release -name "*.a" -exec cp {} package/lib/ \; 2>/dev/null || true
             find out/Release -name "*.dylib" -exec cp {} package/lib/ \; 2>/dev/null || true
             find out/Release -type f -perm +111 -name "dm" -exec cp {} package/bin/ \; 2>/dev/null || true
             find out/Release -type f -perm +111 -name "nanobench" -exec cp {} package/bin/ \; 2>/dev/null || true
             ;;
           "linux"|"android")
-            # Linux/Android平台文件
+            # Linux和Android平台文件复制
             find out/Release -name "*.a" -exec cp {} package/lib/ \; 2>/dev/null || true
             find out/Release -name "*.so" -exec cp {} package/lib/ \; 2>/dev/null || true
             find out/Release -type f -perm +111 -name "dm" -exec cp {} package/bin/ \; 2>/dev/null || true
@@ -231,87 +244,91 @@ jobs:
         
         # 创建构建信息文件
         cat > package/BUILD_INFO.txt << EOF
-Skia 构建信息
-==================
-平台: ${{ matrix.target_os }}
-架构: ${{ matrix.target_cpu }}
-包名: ${{ matrix.platform }}
-构建模式: Release (官方构建)
-Git分支: $(git branch --show-current)
-Git提交: $(git rev-parse HEAD)
-EOF
+        Skia 构建信息
+        ==================
+        平台: ${{ matrix.target_os }}
+        架构: ${{ matrix.target_cpu }}
+        包名: ${{ matrix.platform }}
+        构建模式: Release (官方构建)
+        Git分支: $(git branch --show-current)
+        Git提交: $(git rev-parse HEAD)
+        EOF
         
-        # 创建README文件
+        # 创建使用说明文件
         cat > package/README.md << EOF
-# Skia 构建包 - ${{ matrix.platform }}
+        # Skia 构建包 - ${{ matrix.platform }}
 
-这是Skia图形库的预编译构建包。
+        这是Skia图形库的预编译构建包。
 
-## 包含内容
+        ## 包含内容
 
-- \`include/\` - Skia头文件
-- \`lib/\` - 静态库文件和动态库文件
-- \`bin/\` - 可执行工具程序
-- \`BUILD_INFO.txt\` - 详细构建信息
+        - \`include/\` - Skia头文件
+        - \`lib/\` - 静态库文件和动态库文件
+        - \`bin/\` - 可执行工具程序
+        - \`BUILD_INFO.txt\` - 详细构建信息
 
-## 使用说明
+        ## 使用说明
 
-请根据你的项目需求，将相应的头文件和库文件集成到你的构建系统中。
+        请根据你的项目需求，将相应的头文件和库文件集成到你的构建系统中。
 
-## 平台信息
+        ## 平台信息
 
-- 目标操作系统: ${{ matrix.target_os }}
-- 目标架构: ${{ matrix.target_cpu }}
-EOF
+        - 目标操作系统: ${{ matrix.target_os }}
+        - 目标架构: ${{ matrix.target_cpu }}
+        EOF
         
       shell: bash
       
+    # 打包构建产物为ZIP文件
     - name: 打包构建产物
       run: |
         cd skia/package
         
-        # 根据平台选择合适的打包方式
+        # 根据运行平台选择合适的打包方式
         if [ "${{ runner.os }}" = "Windows" ]; then
-          # Windows使用7zip
+          # Windows系统使用7zip打包
           7z a "../${{ matrix.platform }}.zip" *
         else
-          # Unix系统使用zip
+          # Unix系统使用zip命令打包
           zip -r "../${{ matrix.platform }}.zip" *
         fi
         
-        # 验证zip文件是否创建成功
+        # 验证ZIP文件是否创建成功
         if [ -f "../${{ matrix.platform }}.zip" ]; then
-          echo "✅ 成功创建 ${{ matrix.platform }}.zip"
+          echo "构建包创建成功: ${{ matrix.platform }}.zip"
           ls -lh "../${{ matrix.platform }}.zip"
         else
-          echo "❌ 创建zip文件失败"
+          echo "构建包创建失败"
           exit 1
         fi
       shell: bash
       
+    # 上传构建产物到GitHub Actions
     - name: 上传构建产物
       uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.platform }}
         path: skia/${{ matrix.platform }}.zip
         retention-days: 30
-        compression-level: 0  # zip文件已经压缩，不需要再次压缩
+        compression-level: 0
         
-  # 创建发布汇总
+  # 创建GitHub Release发布
   create-release:
     needs: build-skia
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     
     steps:
+    # 下载所有构建产物
     - name: 下载所有构建产物
       uses: actions/download-artifact@v4
       with:
         path: artifacts
         
+    # 验证所有构建产物的完整性
     - name: 验证所有构建产物
       run: |
-        echo "📦 验证构建产物..."
+        echo "正在验证构建产物..."
         total_size=0
         
         for dir in artifacts/*/; do
@@ -320,69 +337,70 @@ EOF
             zip_file="$dir$platform.zip"
             if [ -f "$zip_file" ]; then
               size=$(stat -f%z "$zip_file" 2>/dev/null || stat -c%s "$zip_file")
-              echo "✅ $platform.zip - $(numfmt --to=iec $size)"
+              echo "构建包: $platform.zip - $(numfmt --to=iec $size)"
               total_size=$((total_size + size))
             else
-              echo "❌ 缺少 $platform.zip"
+              echo "缺少构建包: $platform.zip"
             fi
           fi
         done
         
-        echo "📊 总大小: $(numfmt --to=iec $total_size)"
+        echo "所有构建包总大小: $(numfmt --to=iec $total_size)"
         
+    # 创建发布说明文档
     - name: 创建发布说明
       run: |
         cat > RELEASE_NOTES.md << 'EOF'
-# 🎨 Skia 多平台构建包
+        # Skia 多平台构建包
 
-这个发布包包含了Skia图形库在多个平台和架构上的预编译版本。
+        这个发布包包含了Skia图形库在多个平台和架构上的预编译版本。
 
-## 📋 包含的平台
+        ## 包含的平台
 
-### Windows
-- ✅ `x64_windows.zip` - Windows x64架构
-- ✅ `arm64_windows.zip` - Windows ARM64架构
+        ### Windows
+        - x64_windows.zip - Windows x64架构
+        - arm64_windows.zip - Windows ARM64架构
 
-### macOS  
-- ✅ `x64_macos.zip` - macOS Intel架构
-- ✅ `arm64_macos.zip` - macOS Apple Silicon架构
+        ### macOS  
+        - x64_macos.zip - macOS Intel架构
+        - arm64_macos.zip - macOS Apple Silicon架构
 
-### Linux
-- ✅ `x64_linux.zip` - Linux x64架构  
-- ✅ `arm64_linux.zip` - Linux ARM64架构
+        ### Linux
+        - x64_linux.zip - Linux x64架构  
+        - arm64_linux.zip - Linux ARM64架构
 
-### Android
-- ✅ `x64_android.zip` - Android x64架构
-- ✅ `arm64_android.zip` - Android ARM64架构
+        ### Android
+        - x64_android.zip - Android x64架构
+        - arm64_android.zip - Android ARM64架构
 
-## 📦 每个包都包含
+        ## 每个包都包含
 
-- `include/` - 完整的Skia C++ API头文件
-- `lib/` - 静态库和动态库文件
-- `bin/` - 实用工具程序(dm, nanobench等)
-- `BUILD_INFO.txt` - 详细的构建信息
-- `README.md` - 使用说明
+        - include/ - 完整的Skia C++ API头文件
+        - lib/ - 静态库和动态库文件
+        - bin/ - 实用工具程序(dm, nanobench等)
+        - BUILD_INFO.txt - 详细的构建信息
+        - README.md - 使用说明
 
-## 🔧 构建配置
+        ## 构建配置
 
-- 构建模式: Release (官方优化构建)
-- 所有依赖: 静态链接，无外部依赖
-- 图形后端: 针对每个平台优化
+        - 构建模式: Release (官方优化构建)
+        - 所有依赖: 静态链接，无外部依赖
+        - 图形后端: 针对每个平台优化
 
-## 📖 使用方法
+        ## 使用方法
 
-1. 下载对应平台的zip文件
-2. 解压到你的项目目录
-3. 在构建系统中引用include和lib目录
-4. 开始使用Skia API进行图形开发
-
-EOF
+        1. 下载对应平台的zip文件
+        2. 解压到你的项目目录
+        3. 在构建系统中引用include和lib目录
+        4. 开始使用Skia API进行图形开发
+        EOF
         
+    # 创建GitHub Release发布版本
     - name: 创建GitHub Release
       uses: softprops/action-gh-release@v1
       with:
         tag_name: skia-build-${{ github.run_number }}
-        name: 🎨 Skia构建包 v${{ github.run_number }}
+        name: Skia构建包 v${{ github.run_number }}
         body_path: RELEASE_NOTES.md
         files: |
           artifacts/x64_windows/*.zip
@@ -398,12 +416,13 @@ EOF
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+    # 构建完成通知
     - name: 构建完成通知
       run: |
-        echo "🎉 Skia多平台构建完成！"
-        echo "📦 已生成以下平台的构建包："
+        echo "Skia多平台构建完成！"
+        echo "已生成以下平台的构建包："
         echo "   • Windows: x64, ARM64"  
         echo "   • macOS: x64, ARM64"
         echo "   • Linux: x64, ARM64"
         echo "   • Android: x64, ARM64"
-        echo "🔗 可在Actions页面下载，或在Releases中获取"
+        echo "可在Actions页面下载，或在Releases中获取"
