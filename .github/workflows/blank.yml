@@ -81,6 +81,11 @@ jobs:
       with:
         python-version: '3.x'
         
+    # 设置Visual Studio构建工具（仅Windows平台）
+    - name: 设置Visual Studio构建工具
+      if: runner.os == 'Windows'
+      uses: microsoft/setup-msbuild@v1.1
+      
     # 安装Linux系统依赖包
     - name: 安装Linux系统依赖
       if: runner.os == 'Linux'
@@ -98,13 +103,6 @@ jobs:
       run: |
         # macOS通常已经包含所需的开发工具
         xcode-select --install 2>/dev/null || true
-        
-    # 安装Windows系统依赖
-    - name: 安装Windows系统依赖
-      if: runner.os == 'Windows'
-      run: |
-        # Windows使用Visual Studio构建工具
-        echo "使用Windows默认构建环境"
         
     # 设置Android NDK环境（仅限Android平台）
     - name: 设置Android NDK
@@ -125,6 +123,9 @@ jobs:
       if: runner.os == 'Windows'
       run: |
         echo "${{ github.workspace }}\depot_tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        # 设置depot_tools需要的环境变量
+        echo "DEPOT_TOOLS_WIN_TOOLCHAIN=0" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        echo "GYP_MSVS_VERSION=2022" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
         
     # 获取Skia源代码并同步依赖
     - name: 获取Skia源代码
@@ -157,8 +158,10 @@ jobs:
         # 根据不同平台设置特定参数
         case "${{ matrix.target_os }}" in
           "win")
-            # Windows平台特定配置
-            args="$args clang_win=\"${{ github.workspace }}/depot_tools/win_toolchain\""
+            # Windows平台特定配置 - 使用系统Visual Studio工具链
+            args="$args win_vc=\"C:/Program Files/Microsoft Visual Studio/2022/Enterprise\""
+            args="$args is_clang=false"
+            # ARM64需要特殊配置
             if [ "${{ matrix.target_cpu }}" = "arm64" ]; then
               args="$args target_cpu=\"arm64\""
             fi
@@ -250,8 +253,6 @@ jobs:
         架构: ${{ matrix.target_cpu }}
         包名: ${{ matrix.platform }}
         构建模式: Release (官方构建)
-        Git分支: $(git branch --show-current)
-        Git提交: $(git rev-parse HEAD)
         EOF
         
         # 创建使用说明文件
@@ -262,10 +263,10 @@ jobs:
 
         ## 包含内容
 
-        - \`include/\` - Skia头文件
-        - \`lib/\` - 静态库文件和动态库文件
-        - \`bin/\` - 可执行工具程序
-        - \`BUILD_INFO.txt\` - 详细构建信息
+        - include/ - Skia头文件
+        - lib/ - 静态库文件和动态库文件
+        - bin/ - 可执行工具程序
+        - BUILD_INFO.txt - 详细构建信息
 
         ## 使用说明
 
@@ -286,8 +287,8 @@ jobs:
         
         # 根据运行平台选择合适的打包方式
         if [ "${{ runner.os }}" = "Windows" ]; then
-          # Windows系统使用7zip打包
-          7z a "../${{ matrix.platform }}.zip" *
+          # Windows系统使用PowerShell的Compress-Archive
+          powershell "Compress-Archive -Path * -DestinationPath ../${{ matrix.platform }}.zip"
         else
           # Unix系统使用zip命令打包
           zip -r "../${{ matrix.platform }}.zip" *
@@ -296,7 +297,7 @@ jobs:
         # 验证ZIP文件是否创建成功
         if [ -f "../${{ matrix.platform }}.zip" ]; then
           echo "构建包创建成功: ${{ matrix.platform }}.zip"
-          ls -lh "../${{ matrix.platform }}.zip"
+          ls -lh "../${{ matrix.platform }}.zip" 2>/dev/null || dir "../${{ matrix.platform }}.zip"
         else
           echo "构建包创建失败"
           exit 1
