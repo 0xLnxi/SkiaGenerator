@@ -7,6 +7,12 @@ on:
     branches: [ main, master ]
   workflow_dispatch:  # 允许手动触发
 
+# 设置工作流权限
+permissions:
+  contents: write
+  packages: write
+  actions: read
+
 jobs:
   build-skia:
     runs-on: ${{ matrix.os }}
@@ -159,7 +165,7 @@ jobs:
         # 根据不同平台设置特定参数
         case "${{ matrix.target_os }}" in
           "win")
-            # Windows平台特定配置 - 让系统自动检测工具链
+            # Windows平台特定配置
             if [ "${{ matrix.target_cpu }}" = "arm64" ]; then
               args="$args target_cpu=\"arm64\""
             fi
@@ -325,13 +331,23 @@ jobs:
         retention-days: 30
         compression-level: 0
         
-  # 创建GitHub Release发布
+  # 创建GitHub Release发布（仅在推送到主分支时）
   create-release:
     needs: build-skia
     runs-on: ubuntu-latest
+    # 只有在推送到主分支且所有构建成功时才创建Release
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     
+    # 为此作业设置必要的权限
+    permissions:
+      contents: write
+      packages: write
+    
     steps:
+    # 检出代码以访问仓库信息
+    - name: 检出代码仓库
+      uses: actions/checkout@v4
+      
     # 下载所有构建产物
     - name: 下载所有构建产物
       uses: actions/download-artifact@v4
@@ -343,22 +359,31 @@ jobs:
       run: |
         echo "正在验证构建产物..."
         total_size=0
+        success_count=0
         
         for dir in artifacts/*/; do
           if [ -d "$dir" ]; then
             platform=$(basename "$dir")
             zip_file="$dir$platform.zip"
             if [ -f "$zip_file" ]; then
-              size=$(stat -f%z "$zip_file" 2>/dev/null || stat -c%s "$zip_file")
-              echo "构建包: $platform.zip - $(numfmt --to=iec $size)"
+              size=$(stat -c%s "$zip_file")
+              echo "✅ 构建包: $platform.zip - $(numfmt --to=iec $size)"
               total_size=$((total_size + size))
+              success_count=$((success_count + 1))
             else
-              echo "缺少构建包: $platform.zip"
+              echo "❌ 缺少构建包: $platform.zip"
             fi
           fi
         done
         
-        echo "所有构建包总大小: $(numfmt --to=iec $total_size)"
+        echo "📊 成功构建: $success_count 个平台"
+        echo "📊 所有构建包总大小: $(numfmt --to=iec $total_size)"
+        
+        # 如果没有任何成功的构建包，则退出
+        if [ $success_count -eq 0 ]; then
+          echo "❌ 没有找到任何构建包，跳过Release创建"
+          exit 1
+        fi
         
     # 创建发布说明文档
     - name: 创建发布说明
@@ -390,13 +415,13 @@ jobs:
 
         - include/ - 完整的Skia C++ API头文件
         - lib/ - 静态库和动态库文件
-        - bin/ - 实用工具程序(dm, nanobench等)
+        - bin/ - 实用工具程序（如可用）
         - BUILD_INFO.txt - 详细的构建信息
         - README.md - 使用说明
 
         ## 构建配置
 
-        - 构建模式: Release (官方优化构建)
+        - 构建模式: Release（官方优化构建）
         - 所有依赖: 静态链接，无外部依赖
         - 图形后端: 针对每个平台优化
         - 特性: 核心图形功能，为了简化构建已禁用PDF支持
@@ -420,32 +445,27 @@ jobs:
         
     # 创建GitHub Release发布版本
     - name: 创建GitHub Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         tag_name: skia-build-${{ github.run_number }}
         name: Skia构建包 v${{ github.run_number }}
         body_path: RELEASE_NOTES.md
         files: |
-          artifacts/x64_windows/*.zip
-          artifacts/arm64_windows/*.zip
-          artifacts/x64_macos/*.zip
-          artifacts/arm64_macos/*.zip
-          artifacts/x64_linux/*.zip
-          artifacts/arm64_linux/*.zip
-          artifacts/x64_android/*.zip
-          artifacts/arm64_android/*.zip
+          artifacts/*/**.zip
         draft: false
         prerelease: false
+        generate_release_notes: false
+        make_latest: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     # 构建完成通知
     - name: 构建完成通知
       run: |
-        echo "Skia多平台构建完成！"
-        echo "已生成以下平台的构建包："
+        echo "🎉 Skia多平台构建完成！"
+        echo "📦 已生成以下平台的构建包："
         echo "   • Windows: x64, ARM64"  
         echo "   • macOS: x64, ARM64"
         echo "   • Linux: x64, ARM64"
         echo "   • Android: x64, ARM64"
-        echo "可在Actions页面下载，或在Releases中获取"
+        echo "🔗 可在Actions页面下载，或在Releases中获取"
