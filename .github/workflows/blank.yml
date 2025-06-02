@@ -194,7 +194,7 @@ jobs:
         # 根据不同平台设置特定参数
         case "${{ matrix.target_os }}" in
           "win")
-            # Windows平台特定配置 - 禁用有问题的DNG SDK
+            # Windows平台特定配置 - 使用/MD运行时
             args="$args skia_use_angle=true"
             args="$args skia_use_direct3d=true"
             args="$args skia_use_freetype=true"
@@ -203,6 +203,10 @@ jobs:
             args="$args skia_use_system_harfbuzz=false"
             args="$args skia_use_dng_sdk=false"
             args="$args skia_use_piex=false"
+            # 设置Windows使用/MD运行时（多线程DLL）
+            args="$args extra_cflags=[\"/MD\"]"
+            args="$args extra_cflags_c=[\"/MD\"]"
+            args="$args extra_cflags_cc=[\"/MD\"]"
             if [ "${{ matrix.target_cpu }}" = "arm64" ]; then
               args="$args target_cpu=\"arm64\""
             fi
@@ -362,6 +366,10 @@ jobs:
         - Metal (仅macOS)
         - Direct3D (仅Windows)
         
+        运行时配置:
+        - Windows: 使用/MD运行时 (多线程DLL)
+        - 其他平台: 标准运行时配置
+        
         特殊说明:
         - 使用内置FreeType和HarfBuzz库以避免系统依赖冲突
         - 所有依赖都已静态链接
@@ -387,6 +395,14 @@ jobs:
         - examples/ - 示例资源文件
         - BUILD_INFO.txt - 详细构建信息
         - CMakeLists.txt - CMake配置文件，提供skia::skia目标
+
+        ## Windows运行时配置
+
+        此Windows构建包使用/MD运行时库（多线程DLL），这意味着：
+        - 运行时库动态链接到MSVCRT.dll
+        - 更小的可执行文件大小
+        - 需要确保目标系统安装了相应的Visual C++运行时
+        - 与大多数现代Windows应用程序兼容
 
         ## 支持的功能
 
@@ -453,6 +469,7 @@ jobs:
         1. 添加Skia根目录到编译器包含路径（而不是include子目录）
         2. 链接lib目录中的所有库文件
         3. 根据平台链接相应的系统库
+        4. Windows平台确保使用/MD运行时选项
 
         ## 构建配置说明
 
@@ -463,6 +480,7 @@ jobs:
         - 适合生产环境使用
         - 头文件路径已正确配置
         - 包含完整的模块和第三方依赖
+        - Windows使用/MD运行时以提高兼容性
 
         ## 平台信息
 
@@ -470,6 +488,7 @@ jobs:
         - 目标架构: ${{ matrix.target_cpu }}
         - 图形API: OpenGL + Vulkan
         - 字体库: 内置FreeType和HarfBuzz (避免系统依赖)
+        - 运行时: Windows使用/MD，其他平台使用标准配置
         
         ## 性能提示
         
@@ -527,7 +546,7 @@ jobs:
         
         # 根据平台设置特定的链接库和编译选项
         if(WIN32)
-            # Windows平台配置
+            # Windows平台配置 - 使用/MD运行时
             target_compile_definitions(skia INTERFACE
                 SK_GANESH=1
                 SK_VULKAN=1
@@ -537,6 +556,14 @@ jobs:
                 SK_ENABLE_SVG=1
                 UNICODE
                 _UNICODE
+            )
+            
+            # 设置Windows运行时为/MD（多线程DLL）
+            target_compile_options(skia INTERFACE
+                $<$<CONFIG:Debug>:/MDd>
+                $<$<CONFIG:Release>:/MD>
+                $<$<CONFIG:RelWithDebInfo>:/MD>
+                $<$<CONFIG:MinSizeRel>:/MD>
             )
             
             # 添加Windows系统库
@@ -715,12 +742,13 @@ jobs:
         message(STATUS "  - 模块目录: ${SKIA_ROOT_DIR}/modules")
         message(STATUS "  - 第三方依赖: ${SKIA_ROOT_DIR}/third_party")
         message(STATUS "  - 库目录: ${SKIA_ROOT_DIR}/lib")
-        message(STATUS "  - 找到库文件数量: " ${SKIA_LIBRARIES})
+        message(STATUS "  - 找到库文件数量: ${SKIA_LIBRARIES}")
         message(STATUS "  - 支持GPU渲染: OpenGL + Vulkan")
         message(STATUS "  - 支持核心功能: PDF, SVG, Skottie")
         message(STATUS "  - 字体和文本: 内置FreeType + HarfBuzz")
         message(STATUS "  - 颜色管理: skcms模块")
         if(WIN32)
+            message(STATUS "  - Windows运行时: /MD (多线程DLL)")
             message(STATUS "  - 注意: Windows平台已禁用DNG SDK以保证C++17兼容性")
         else()
             message(STATUS "  - DNG RAW图像: 完整支持")
@@ -741,6 +769,9 @@ jobs:
             message(STATUS "  ✓ 颜色管理 (skcms)")
             message(STATUS "  ✓ 源码include格式支持")
             message(STATUS "  ✓ 模块依赖支持")
+            if(WIN32)
+                message(STATUS "  ✓ Windows /MD运行时")
+            endif()
             if(NOT WIN32)
                 message(STATUS "  ✓ DNG RAW图像处理")
             endif()
@@ -771,6 +802,13 @@ jobs:
             message(STATUS "  // 模块依赖")
             message(STATUS "  #include \"modules/skcms/skcms.h\"")
             message(STATUS "  #include \"modules/skshaper/include/SkShaper.h\"")
+            if(WIN32)
+                message(STATUS "")
+                message(STATUS "Windows特殊说明:")
+                message(STATUS "  - 此构建使用/MD运行时")
+                message(STATUS "  - 确保你的项目也使用/MD运行时")
+                message(STATUS "  - 安装相应的Visual C++运行时库")
+            endif()
             message(STATUS "")
         endfunction()
         
@@ -880,8 +918,8 @@ jobs:
         ## 包含的平台
 
         ### Windows
-        - x64_windows.zip - Windows x64架构
-        - arm64_windows.zip - Windows ARM64架构
+        - x64_windows.zip - Windows x64架构（使用/MD运行时）
+        - arm64_windows.zip - Windows ARM64架构（使用/MD运行时）
 
         ### macOS  
         - x64_macos.zip - macOS Intel架构
@@ -894,6 +932,27 @@ jobs:
         ### Android
         - x64_android.zip - Android x64架构
         - arm64_android.zip - Android ARM64架构
+
+        ## Windows运行时配置
+
+        **重要说明**: Windows构建包使用/MD运行时库（多线程DLL），这意味着：
+
+        ### 优势
+        - ✅ 更小的可执行文件大小
+        - ✅ 与大多数现代Windows应用程序兼容
+        - ✅ 支持多线程应用程序
+        - ✅ 动态链接到MSVCRT.dll
+
+        ### 要求
+        - 🔧 目标系统需要安装Visual C++运行时库
+        - 🔧 你的项目也需要使用/MD或/MDd运行时选项
+        - 🔧 Debug版本使用/MDd，Release版本使用/MD
+
+        ### CMake配置示例
+        ```cmake
+        # 确保你的项目使用相同的运行时
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
+        ```
 
         ## 每个包都包含
 
@@ -970,12 +1029,14 @@ jobs:
 
         # 链接到你的目标
         target_link_libraries(your_target skia::skia)
+
+        # Windows平台确保使用相同的运行时
+        if(WIN32)
+            set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
+        endif()
         ```
 
-        CMake会自动设置正确的包含路径，包括：
-        - Skia根目录（支持 `#include <include/...>` 格式）
-        - modules目录（支持 `#include "modules/..."` 格式）
-        - third_party目录（支持第三方依赖）
+        CMake会自动设置正确的包含路径和运行时配置。
 
         ## 手动集成
 
@@ -985,6 +1046,7 @@ jobs:
         3. 将third_party目录添加到编译器包含路径
         4. 链接lib目录中的所有库文件
         5. 根据平台链接相应的系统库
+        6. **Windows**: 确保使用/MD或/MDd编译选项
 
         ## 生产级特性
 
@@ -993,13 +1055,14 @@ jobs:
         - **API兼容性**: 避免实验性API和调试工具
         - **依赖管理**: 使用内置依赖库，避免系统冲突
         - **构建优化**: Release模式完整优化
-        - **完整模块**: 包含所有必要的模块和依赖文件
+        - **运行时一致性**: Windows使用/MD运行时提高兼容性
 
         ### 解决常见问题
         - ✅ 修复了 `"modules/skcms/skcms.h": No such file or directory` 错误
         - ✅ 包含完整的第三方依赖头文件
         - ✅ 正确配置模块路径
         - ✅ 支持所有源码include格式
+        - ✅ Windows运行时库冲突问题已解决
 
         ## 性能特性
 
@@ -1014,22 +1077,22 @@ jobs:
         ## 使用建议
 
         1. **GPU后端选择**: Vulkan > Metal > OpenGL > Direct3D
-        2. **生产部署**: 此版本专为生产环境优化
-        3. **性能调优**: 启用GPU渲染和多线程处理
-        4. **文本处理**: 内置引擎无需额外配置
-        5. **颜色管理**: 利用skcms模块进行精确色彩转换
-        6. **跨平台**: 相同API在所有平台保持一致
+        2. **Windows运行时**: 确保项目使用/MD运行时
+        3. **生产部署**: 此版本专为生产环境优化
+        4. **性能调优**: 启用GPU渲染和多线程处理
+        5. **文本处理**: 内置引擎无需额外配置
+        6. **颜色管理**: 利用skcms模块进行精确色彩转换
 
         ## 兼容性
 
         - **最低系统要求**: 
-          - Windows 10+
+          - Windows 10+ (需要Visual C++运行时)
           - macOS 10.15+  
           - Linux kernel 4.4+
           - Android API 21+
         - **GPU要求**: 支持OpenGL 3.3+或Vulkan 1.0+的显卡
         - **依赖**: 无外部依赖，完全自包含
-        - **代码兼容**: 完美支持源码include格式和模块依赖
+        - **运行时**: Windows使用/MD，其他平台使用标准配置
 
         ## 自动更新
 
@@ -1037,7 +1100,7 @@ jobs:
 
         ## 技术支持
 
-        如有问题，请查看包内的README.md文件或参考Skia官方文档。此版本已解决常见的模块依赖问题，应该可以直接使用。
+        如有问题，请查看包内的README.md文件或参考Skia官方文档。此版本已解决常见的模块依赖和运行时问题，应该可以直接使用。
         EOF
         
     # 获取发布标签
@@ -1075,10 +1138,10 @@ jobs:
       run: |
         echo "🎉 Skia生产级多平台构建完成！"
         echo "📦 已生成以下平台的构建包："
-        echo "   • Windows: x64, ARM64（生产级优化）"  
-        echo "   • macOS: x64, ARM64（生产级优化）"
-        echo "   • Linux: x64, ARM64（生产级优化）"
-        echo "   • Android: x64, ARM64（生产级优化）"
+        echo "   • Windows: x64, ARM64（使用/MD运行时）"  
+        echo "   • macOS: x64, ARM64（标准配置）"
+        echo "   • Linux: x64, ARM64（标准配置）"
+        echo "   • Android: x64, ARM64（标准配置）"
         echo "🔗 可在Actions页面下载，或在Releases中获取"
         echo "📋 每个包都包含生产级CMakeLists.txt配置"
         echo "🎮 支持OpenGL和Vulkan GPU后端"
@@ -1088,3 +1151,4 @@ jobs:
         echo "🚀 生产环境就绪，稳定性优先"
         echo "📁 完美支持源码include格式和模块依赖"
         echo "🎨 包含skcms颜色管理模块"
+        echo "⚙️  Windows平台使用/MD运行时库"
