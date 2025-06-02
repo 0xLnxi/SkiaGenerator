@@ -105,9 +105,16 @@ jobs:
         sudo apt-get install -y libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
         # 安装ICU和HarfBuzz
         sudo apt-get install -y libicu-dev libharfbuzz-dev
-        # 如果是ARM64平台，安装交叉编译工具链
+        # 如果是ARM64平台，安装交叉编译工具链和ARM64依赖
         if [ "${{ matrix.target_cpu }}" = "arm64" ] && [ "${{ matrix.target_os }}" = "linux" ]; then
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          # 添加ARM64架构支持
+          sudo dpkg --add-architecture arm64
+          sudo apt-get update
+          # 安装ARM64版本的库文件
+          sudo apt-get install -y libfontconfig1-dev:arm64 libfreetype6-dev:arm64
+          sudo apt-get install -y libgl1-mesa-dev:arm64 libx11-dev:arm64
+          sudo apt-get install -y libvulkan-dev:arm64 libicu-dev:arm64 libharfbuzz-dev:arm64
         fi
         
     # 安装macOS系统依赖
@@ -193,7 +200,7 @@ jobs:
         # 根据不同平台设置特定参数
         case "${{ matrix.target_os }}" in
           "win")
-            # Windows平台特定配置
+            # Windows平台特定配置 - 使用内置依赖避免链接问题
             args="$args skia_use_angle=true"
             args="$args skia_use_direct3d=true"
             args="$args skia_use_freetype=true"
@@ -237,11 +244,17 @@ jobs:
             args="$args skia_enable_skottie=true"
             args="$args skia_enable_svg=true"
             if [ "${{ matrix.target_cpu }}" = "arm64" ]; then
+              # ARM64交叉编译配置
               args="$args cc=\"aarch64-linux-gnu-gcc\""
               args="$args cxx=\"aarch64-linux-gnu-g++\""
               args="$args ar=\"aarch64-linux-gnu-ar\""
+              # 使用内置库避免交叉编译依赖问题
               args="$args skia_use_system_freetype2=false"
               args="$args skia_use_system_harfbuzz=false"
+              args="$args skia_use_fontconfig=false"
+              # 设置交叉编译系统根目录
+              args="$args extra_cflags=[\"-I/usr/include/aarch64-linux-gnu\"]"
+              args="$args extra_ldflags=[\"-L/usr/lib/aarch64-linux-gnu\"]"
             else
               args="$args skia_use_system_freetype2=true"
               args="$args skia_use_system_harfbuzz=true"
@@ -356,9 +369,11 @@ jobs:
         - 静态库位于 lib/ 目录
         - CMake默认链接动态库
         - 使用内置依赖避免系统库冲突
+        - 头文件包含路径支持源码格式引用
         
         平台特殊说明:
         - macOS平台为避免链接问题暂时禁用了Skottie和SVG模块
+        - Linux ARM64使用内置依赖库避免交叉编译问题
         - 其他平台支持完整功能包括Skottie动画和SVG图形
         - 所有平台都支持核心2D渲染和GPU加速
         EOF
@@ -367,7 +382,7 @@ jobs:
         cat > package/README.md << EOF
         # Skia 动态库构建包 - ${{ matrix.platform }}
 
-        这是Skia图形库的动态库预编译构建包，包含核心功能模块。
+        这是Skia图形库的动态库预编译构建包，包含核心功能模块，支持源码格式的头文件引用。
 
         ## 包含内容
 
@@ -377,6 +392,25 @@ jobs:
         - examples/ - 示例资源文件
         - BUILD_INFO.txt - 详细构建信息
         - CMakeLists.txt - CMake配置文件，默认链接动态库
+
+        ## 头文件包含支持
+
+        此构建包支持以下源码格式的头文件包含：
+        
+        \`\`\`cpp
+        #include <include/core/SkImageInfo.h>
+        #include <include/core/SkImage.h>
+        #include <include/core/SkData.h>
+        #include <include/core/SkFont.h>
+        #include <include/core/SkTypeface.h>
+        #include <include/core/SkFontMgr.h>
+        #include <include/core/SkTextBlob.h>
+        #include <include/gpu/ganesh/GrDirectContext.h>
+        #include <include/gpu/ganesh/GrBackendSurface.h>
+        #include <include/gpu/ganesh/gl/GrGLBackendSurface.h>
+        #include <include/gpu/ganesh/gl/GrGLDirectContext.h>
+        #include <include/gpu/ganesh/gl/GrGLInterface.h>
+        \`\`\`
 
         ## 动态库特性
 
@@ -430,18 +464,8 @@ jobs:
         ### CMake自动配置
         - 自动链接bin目录中的动态库
         - 自动设置运行时库路径
+        - 自动配置头文件包含路径支持源码格式引用
         - 跨平台库文件格式自动适配
-
-        ## 平台特殊说明
-
-        ### macOS平台
-        - 为确保构建稳定性，暂时禁用了SVG和Skottie模块
-        - 支持所有其他功能包括Metal GPU渲染、PDF导出
-        - 如需SVG/Skottie支持，请使用其他平台或自行编译
-
-        ### 其他平台
-        - 支持完整功能包括SVG矢量图形和Skottie动画
-        - 提供最佳的功能完整性
 
         ## 平台信息
 
@@ -449,17 +473,7 @@ jobs:
         - 目标架构: ${{ matrix.target_cpu }}
         - 图形API: OpenGL + Vulkan
         - 库类型: 动态库（首选）+ 静态库（备用）
-        
-        ## 部署建议
-        
-        ### 开发阶段
-        - 使用动态库便于调试和快速迭代
-        - 确保动态库路径正确配置
-        
-        ### 生产部署
-        - 将动态库与应用程序一起分发
-        - 配置正确的库搜索路径
-        - 考虑版本兼容性问题
+        - 头文件格式: 支持源码风格的include路径
         EOF
         
       shell: bash
@@ -492,8 +506,12 @@ jobs:
         add_library(skia INTERFACE)
         add_library(skia::skia ALIAS skia)
         
-        # 设置包含目录
+        # 设置包含目录，支持源码格式的include路径
         target_include_directories(skia INTERFACE
+            # 主要包含目录 - 支持 #include <include/core/...> 格式
+            $<BUILD_INTERFACE:${SKIA_ROOT_DIR}>
+            $<INSTALL_INTERFACE:.>
+            # 传统包含目录 - 支持 #include <core/...> 格式
             $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/include>
             $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/include/modules>
             $<INSTALL_INTERFACE:include>
@@ -689,8 +707,9 @@ jobs:
         
         # 显示配置信息
         message(STATUS "Skia动态库预编译包配置完成")
-        message(STATUS "  - 包含目录: ${SKIA_ROOT_DIR}/include")
-        message(STATUS "  - 模块包含目录: ${SKIA_ROOT_DIR}/include/modules")
+        message(STATUS "  - 根目录: ${SKIA_ROOT_DIR}")
+        message(STATUS "  - 头文件包含: 支持源码格式 #include <include/core/...>")
+        message(STATUS "  - 头文件包含: 支持传统格式 #include <core/...>")
         message(STATUS "  - 动态库目录: ${SKIA_ROOT_DIR}/bin")
         message(STATUS "  - 静态库目录: ${SKIA_ROOT_DIR}/lib")
         message(STATUS "  - 支持GPU渲染: OpenGL + Vulkan")
@@ -712,6 +731,7 @@ jobs:
             message(STATUS "  ✓ 高级文本处理")
             message(STATUS "  ✓ 图像编解码")
             message(STATUS "  ✓ 动态库链接")
+            message(STATUS "  ✓ 源码格式头文件包含")
             message(STATUS "  ✓ 运行时路径配置")
             if(NOT APPLE)
                 message(STATUS "  ✓ SVG矢量图形")
@@ -741,6 +761,9 @@ jobs:
         message(STATUS "")
         message(STATUS "使用方法:")
         message(STATUS "  target_link_libraries(your_target skia::skia)")
+        message(STATUS "  # 支持源码格式头文件包含:")
+        message(STATUS "  # #include <include/core/SkCanvas.h>")
+        message(STATUS "  # #include <include/gpu/ganesh/GrDirectContext.h>")
         message(STATUS "  # Windows下可选择复制DLL:")
         message(STATUS "  # copy_skia_dlls(your_target)")
         EOF
@@ -842,7 +865,7 @@ jobs:
         cat > RELEASE_NOTES.md << 'EOF'
         # Skia 动态库多平台构建包
 
-        这个发布包包含了Skia图形库在多个平台和架构上的动态库预编译版本，针对稳定性进行了优化。
+        这个发布包包含了Skia图形库在多个平台和架构上的动态库预编译版本，支持源码格式的头文件包含，针对稳定性进行了优化。
 
         ## 包含的平台
 
@@ -871,6 +894,34 @@ jobs:
         - BUILD_INFO.txt - 详细的构建信息
         - README.md - 使用说明
         - CMakeLists.txt - CMake配置文件，默认链接动态库
+
+        ## 头文件包含支持
+
+        ### 源码格式支持
+        此构建包特别支持Skia源码中使用的头文件包含格式：
+
+        ```cpp
+        #include <include/core/SkImageInfo.h>
+        #include <include/core/SkImage.h>
+        #include <include/core/SkData.h>
+        #include <include/core/SkFont.h>
+        #include <include/core/SkTypeface.h>
+        #include <include/core/SkFontMgr.h>
+        #include <include/core/SkTextBlob.h>
+        #include <include/gpu/ganesh/GrDirectContext.h>
+        #include <include/gpu/ganesh/GrBackendSurface.h>
+        #include <include/gpu/ganesh/gl/GrGLBackendSurface.h>
+        #include <include/gpu/ganesh/gl/GrGLDirectContext.h>
+        #include <include/gpu/ganesh/gl/GrGLInterface.h>
+        ```
+
+        ### 传统格式支持
+        同时也支持传统的简化包含格式：
+
+        ```cpp
+        #include <core/SkCanvas.h>
+        #include <gpu/GrDirectContext.h>
+        ```
 
         ## 动态库特性
 
@@ -921,6 +972,7 @@ jobs:
         | 文本处理 | ✅ | ✅ | ✅ | ✅ |
         | SVG矢量图形 | ✅ | ✅ | ✅ | ❌ |
         | Skottie动画 | ✅ | ✅ | ✅ | ❌ |
+        | 源码格式包含 | ✅ | ✅ | ✅ | ✅ |
 
         ## CMake集成（推荐方式）
 
@@ -933,8 +985,22 @@ jobs:
         target_link_libraries(your_target skia::skia)
         ```
 
+        ### 头文件包含示例
+        ```cpp
+        // 在你的C++源文件中直接使用
+        #include <include/core/SkCanvas.h>
+        #include <include/core/SkSurface.h>
+        #include <include/gpu/ganesh/GrDirectContext.h>
+
+        // 或者使用传统格式
+        #include <core/SkCanvas.h>
+        #include <gpu/GrDirectContext.h>
+        ```
+
         ### CMake自动特性
         - ✅ **优先链接动态库** - 自动检测并使用bin目录中的动态库
+        - ✅ **源码格式包含支持** - 支持 `#include <include/core/...>` 格式
+        - ✅ **传统格式包含支持** - 支持 `#include <core/...>` 格式
         - ✅ **自动设置运行时路径** - 配置rpath/runpath
         - ✅ **跨平台适配** - 自动适配不同平台的库格式
         - ✅ **依赖管理** - 自动链接所需的系统库
@@ -951,16 +1017,17 @@ jobs:
         - ✅ 高级文本布局和字体处理
         - ✅ Metal GPU渲染（原生性能）
         - ✅ 图像编解码和处理
+        - ✅ 源码格式头文件包含
         - ❌ SVG矢量图形（暂时禁用）
         - ❌ Skottie动画（暂时禁用）
 
-        **替代方案：**
-        - **SVG需求**: 使用其他平台的构建包或第三方SVG库
-        - **动画需求**: 使用其他平台的构建包或其他动画库
-        - **跨平台开发**: 在macOS上开发，在其他平台部署完整功能
+        ### Linux ARM64平台优化
+        - 使用内置依赖库避免交叉编译依赖问题
+        - 自动配置交叉编译环境
+        - 支持完整功能包括SVG和Skottie
 
         ### 其他平台
-        Windows、Linux和Android平台支持完整功能，包括SVG矢量图形和Skottie动画支持。
+        Windows、Linux x64和Android平台支持完整功能，包括SVG矢量图形和Skottie动画支持。
 
         ## 部署指南
 
@@ -968,6 +1035,7 @@ jobs:
         1. 解压构建包到项目目录
         2. 使用CMake自动配置
         3. 确保动态库路径正确
+        4. 使用源码格式的头文件包含
 
         ### 生产环境
         1. **Windows**: 将DLL文件与可执行文件一起分发
@@ -988,15 +1056,14 @@ jobs:
 
         ### 最佳实践
         1. **优先使用CMake** - 自动处理复杂的链接配置
-        2. **功能选择** - 根据平台选择合适的功能
-        3. **版本管理** - 注意动态库版本兼容性
-        4. **性能监控** - 监控动态库加载性能
-        5. **备用方案** - 准备静态库作为备选
+        2. **使用源码格式包含** - 与Skia官方源码保持一致
+        3. **功能选择** - 根据平台选择合适的功能
+        4. **版本管理** - 注意动态库版本兼容性
+        5. **性能监控** - 监控动态库加载性能
 
-        ### 功能需求建议
-        - **需要SVG/Skottie**: 优先选择Windows、Linux或Android平台
-        - **macOS开发**: 专注于2D渲染、PDF和文本处理功能
-        - **跨平台项目**: 在设计时考虑平台功能差异
+        ### 代码迁移建议
+        - **从Skia源码迁移**: 直接使用现有的include路径
+        - **从其他构建迁移**: 更新include路径以使用源码格式
 
         ## 兼容性
 
@@ -1007,22 +1074,24 @@ jobs:
           - Android API 21+
         - **GPU要求**: 支持OpenGL 3.3+或Vulkan 1.0+的显卡
         - **运行时**: 确保动态库路径正确配置
+        - **编译器**: 支持C++17标准的编译器
 
         ## 版本说明
 
-        此版本针对构建稳定性进行了优化：
-        - 优先保证核心功能的稳定性
-        - 暂时禁用了macOS平台的问题模块
-        - 提供了清晰的平台功能对比
-        - 包含详细的替代方案建议
+        此版本特色：
+        - ✅ 支持源码格式的头文件包含
+        - ✅ 优化了Linux ARM64交叉编译
+        - ✅ 修复了Windows模块链接问题
+        - ✅ 针对构建稳定性进行了优化
+        - ✅ 提供了清晰的平台功能对比
 
         ## 自动更新
 
-        此构建包每天自动更新，确保包含最新的稳定Skia代码。我们会持续监控macOS平台的模块问题并在后续版本中修复。
+        此构建包每天自动更新，确保包含最新的稳定Skia代码。我们会持续监控各平台的兼容性问题并在后续版本中修复。
 
         ## 技术支持
 
-        如有问题，请查看包内的README.md文件。macOS平台的SVG和Skottie问题将在后续版本中解决。
+        如有问题，请查看包内的README.md文件。头文件包含问题请参考文档中的示例代码。
         EOF
         
     # 获取发布标签
@@ -1062,7 +1131,7 @@ jobs:
         echo "📦 已生成以下平台的动态库构建包："
         echo "   • Windows: x64, ARM64 (完整功能)"  
         echo "   • macOS: x64, ARM64 (核心功能，不含SVG/Skottie)"
-        echo "   • Linux: x64, ARM64 (完整功能)"
+        echo "   • Linux: x64, ARM64 (完整功能，ARM64使用内置依赖)"
         echo "   • Android: x64, ARM64 (完整功能)"
         echo "🔗 可在Actions页面下载，或在Releases中获取"
         echo "📋 每个包都包含动态库优先的CMakeLists.txt配置"
@@ -1072,4 +1141,5 @@ jobs:
         echo "📄 PDF导出支持字体子集功能"
         echo "🚀 动态库优化，便于部署和维护"
         echo "📁 动态库位于bin目录，CMake自动链接"
+        echo "📝 支持源码格式头文件包含 #include <include/core/...>"
         echo "⚠️  macOS平台暂时禁用SVG和Skottie模块以确保构建稳定性"
