@@ -118,8 +118,9 @@ jobs:
         xcode-select --install 2>/dev/null || true
         # 安装ninja构建工具和其他依赖
         brew install ninja || true
-        # 不安装系统FreeType，使用Skia内置版本
-        echo "使用Skia内置的FreeType库"
+        # 安装HarfBuzz库（如果启用的话）
+        # brew install harfbuzz || true
+        echo "使用Skia内置的HarfBuzz库"
         
     # 安装Windows系统依赖
     - name: 安装Windows系统依赖
@@ -172,7 +173,7 @@ jobs:
         args="$args skia_use_system_libwebp=false"
         args="$args skia_use_system_zlib=false"
         
-        # 启用全量功能支持
+        # 启用全量功能支持，但使用内置依赖库
         args="$args skia_enable_pdf=true"
         args="$args skia_enable_skottie=true"
         args="$args skia_enable_skshaper=true"
@@ -180,7 +181,6 @@ jobs:
         args="$args skia_enable_tools=true"
         args="$args skia_use_dng_sdk=true"
         args="$args skia_use_piex=true"
-        args="$args skia_use_harfbuzz=true"
         args="$args skia_use_icu=true"
         
         # 启用GPU后端支持
@@ -201,17 +201,22 @@ jobs:
             args="$args skia_use_direct3d=true"
             args="$args skia_use_freetype=true"
             args="$args skia_use_system_freetype2=false"
+            args="$args skia_use_harfbuzz=true"
+            args="$args skia_use_system_harfbuzz=false"
             if [ "${{ matrix.target_cpu }}" = "arm64" ]; then
               args="$args target_cpu=\"arm64\""
             fi
             ;;
           "mac")
-            # macOS平台特定配置 - 使用内置FreeType避免系统库冲突
+            # macOS平台特定配置 - 使用内置库避免系统库冲突
             args="$args skia_use_metal=true"
             args="$args skia_enable_skottie=true"
             args="$args skia_use_freetype=true"
             args="$args skia_use_system_freetype2=false"
             args="$args skia_use_fontconfig=false"
+            args="$args skia_use_harfbuzz=true"
+            args="$args skia_use_system_harfbuzz=false"
+            args="$args skia_pdf_subset_harfbuzz=true"
             if [ "${{ matrix.target_cpu }}" = "arm64" ]; then
               args="$args target_cpu=\"arm64\""
             fi
@@ -221,13 +226,16 @@ jobs:
             args="$args skia_use_x11=true"
             args="$args skia_use_freetype=true"
             args="$args skia_use_fontconfig=true"
+            args="$args skia_use_harfbuzz=true"
             if [ "${{ matrix.target_cpu }}" = "arm64" ]; then
               args="$args cc=\"aarch64-linux-gnu-gcc\""
               args="$args cxx=\"aarch64-linux-gnu-g++\""
               args="$args ar=\"aarch64-linux-gnu-ar\""
               args="$args skia_use_system_freetype2=false"
+              args="$args skia_use_system_harfbuzz=false"
             else
               args="$args skia_use_system_freetype2=true"
+              args="$args skia_use_system_harfbuzz=true"
             fi
             ;;
           "android")
@@ -237,6 +245,8 @@ jobs:
             args="$args skia_use_freetype=true"
             args="$args skia_enable_fontmgr_android=true"
             args="$args skia_use_vulkan=true"
+            args="$args skia_use_harfbuzz=true"
+            args="$args skia_use_system_harfbuzz=false"
             ;;
         esac
         
@@ -317,10 +327,10 @@ jobs:
         
         支持的功能:
         - GPU渲染 (OpenGL + Vulkan)
-        - PDF导出
+        - PDF导出 (内置HarfBuzz)
         - SVG支持
         - Skottie动画
-        - 文本整形 (HarfBuzz)
+        - 文本整形 (内置HarfBuzz)
         - 字体管理 (内置FreeType)
         - 图像编解码
         
@@ -331,8 +341,9 @@ jobs:
         - Direct3D (仅Windows)
         
         特殊说明:
-        - 使用内置FreeType库以避免系统依赖冲突
+        - 使用内置FreeType和HarfBuzz库以避免系统依赖冲突
         - 所有依赖都已静态链接
+        - 支持完整的PDF子集功能
         EOF
         
         # 创建使用说明文件
@@ -367,11 +378,11 @@ jobs:
         - Direct3D (Windows)
         
         ### 高级功能
-        - PDF文档生成和导出
+        - PDF文档生成和导出（支持字体子集）
         - SVG矢量图形支持
         - Skottie Lottie动画播放
-        - 复杂文本布局和整形
-        - 多种字体格式支持（使用内置FreeType）
+        - 复杂文本布局和整形（内置HarfBuzz）
+        - 多种字体格式支持（内置FreeType）
         - 完整的图像编解码器
         
         ### 工具和实用程序
@@ -400,14 +411,15 @@ jobs:
         - 目标操作系统: ${{ matrix.target_os }}
         - 目标架构: ${{ matrix.target_cpu }}
         - 图形API: OpenGL + Vulkan
-        - 字体库: 内置FreeType (避免系统依赖)
+        - 字体库: 内置FreeType和HarfBuzz (避免系统依赖)
         
         ## 性能提示
         
         - 使用GPU后端可显著提升渲染性能
         - Vulkan后端在现代硬件上性能最佳
         - 启用多线程可提升复杂场景渲染速度
-        - 内置FreeType确保跨平台字体渲染一致性
+        - 内置FreeType和HarfBuzz确保跨平台文本渲染一致性
+        - PDF导出支持字体子集，可减小文件大小
         EOF
         
       shell: bash
@@ -568,6 +580,7 @@ jobs:
             find_package(PkgConfig QUIET)
             if(PKG_CONFIG_FOUND)
                 pkg_check_modules(FONTCONFIG QUIET fontconfig)
+                pkg_check_modules(HARFBUZZ QUIET harfbuzz)
             endif()
             
             # 查找Vulkan
@@ -590,6 +603,12 @@ jobs:
             if(FONTCONFIG_FOUND)
                 target_link_libraries(skia INTERFACE ${FONTCONFIG_LIBRARIES})
                 target_include_directories(skia INTERFACE ${FONTCONFIG_INCLUDE_DIRS})
+            endif()
+            
+            # 只有在找到HarfBuzz时才链接（因为可能使用内置库）
+            if(HARFBUZZ_FOUND)
+                target_link_libraries(skia INTERFACE ${HARFBUZZ_LIBRARIES})
+                target_include_directories(skia INTERFACE ${HARFBUZZ_INCLUDE_DIRS})
             endif()
             
             # 添加Vulkan支持（如果可用）
@@ -635,19 +654,19 @@ jobs:
         message(STATUS "  - 找到库文件数量: " ${SKIA_LIBRARIES})
         message(STATUS "  - 支持GPU渲染: OpenGL + Vulkan")
         message(STATUS "  - 支持完整功能: PDF, SVG, Skottie")
-        message(STATUS "  - 字体支持: 内置FreeType (无系统依赖)")
+        message(STATUS "  - 字体和文本: 内置FreeType + HarfBuzz")
         
         # 创建便捷的配置检查函数
         function(check_skia_features)
             message(STATUS "Skia功能检查:")
             message(STATUS "  ✓ 2D渲染和绘图")
             message(STATUS "  ✓ GPU加速 (OpenGL/Vulkan)")
-            message(STATUS "  ✓ PDF文档生成")
+            message(STATUS "  ✓ PDF文档生成 (支持字体子集)")
             message(STATUS "  ✓ SVG矢量图形")
             message(STATUS "  ✓ Skottie动画")
-            message(STATUS "  ✓ 高级文本处理")
+            message(STATUS "  ✓ 高级文本处理 (HarfBuzz)")
             message(STATUS "  ✓ 图像编解码")
-            message(STATUS "  ✓ 内置字体引擎")
+            message(STATUS "  ✓ 内置字体和文本引擎")
         endfunction()
         
         # 自动调用功能检查
@@ -797,11 +816,11 @@ jobs:
         - **Direct3D** - Windows原生GPU API
 
         ### 高级功能
-        - **PDF文档生成** - 完整的PDF导出功能
+        - **PDF文档生成** - 完整的PDF导出功能，支持字体子集
         - **SVG矢量图形** - SVG文件解析和渲染
         - **Skottie动画** - Lottie格式动画播放
-        - **复杂文本布局** - HarfBuzz文本整形
-        - **内置字体引擎** - 使用内置FreeType，无系统依赖
+        - **复杂文本布局** - 内置HarfBuzz文本整形引擎
+        - **多语言字体** - 内置FreeType字体渲染引擎
         - **图像编解码** - 支持多种图像格式
 
         ## CMake集成
@@ -819,10 +838,10 @@ jobs:
         ## 构建优化
 
         - **构建模式**: Release（完整优化构建）
-        - **依赖处理**: 静态链接，使用内置FreeType避免系统依赖冲突
+        - **依赖处理**: 静态链接，使用内置FreeType和HarfBuzz
         - **图形后端**: OpenGL + Vulkan + 平台原生API
         - **功能完整性**: 包含所有Skia模块和功能
-        - **跨平台一致性**: 内置字体引擎确保渲染一致性
+        - **跨平台一致性**: 内置依赖库确保渲染一致性
 
         ## 性能特性
 
@@ -830,7 +849,8 @@ jobs:
         - **多线程**: 支持并行渲染和处理
         - **内存优化**: 高效的内存管理
         - **缓存机制**: 智能的资源缓存
-        - **字体优化**: 内置FreeType提供最佳字体渲染性能
+        - **文本优化**: 内置HarfBuzz提供最佳文本处理性能
+        - **PDF优化**: 支持字体子集，减小PDF文件大小
 
         ## 使用建议
 
@@ -838,7 +858,8 @@ jobs:
         2. **启用GPU渲染**: 在支持的硬件上优先使用GPU
         3. **合理使用缓存**: 复用Surface和Canvas对象
         4. **多线程渲染**: 在多核设备上并行处理
-        5. **字体管理**: 内置字体引擎无需额外配置
+        5. **文本处理**: 内置文本引擎无需额外配置
+        6. **PDF生成**: 利用字体子集功能优化文件大小
 
         ## 兼容性
 
@@ -848,7 +869,7 @@ jobs:
           - Linux kernel 4.4+
           - Android API 21+
         - **GPU要求**: 支持OpenGL 3.3+或Vulkan 1.0+的显卡
-        - **依赖**: 无外部字体库依赖，内置FreeType
+        - **依赖**: 无外部字体和文本库依赖
 
         ## 自动更新
 
@@ -859,7 +880,7 @@ jobs:
         如有问题，请查看包内的README.md文件或参考Skia官方文档。
         EOF
         
-    # 获取当前日期作为标签
+    # 获取发布标签
     - name: 获取发布标签
       id: get_tag
       run: |
@@ -902,4 +923,5 @@ jobs:
         echo "📋 每个包都包含完整CMakeLists.txt，提供skia::skia目标"
         echo "🎮 支持OpenGL和Vulkan GPU后端"
         echo "✨ 包含PDF、SVG、Skottie等完整功能"
-        echo "🔤 使用内置FreeType字体引擎，无系统依赖"
+        echo "🔤 使用内置FreeType和HarfBuzz引擎，无系统依赖"
+        echo "📄 PDF导出支持字体子集功能"
