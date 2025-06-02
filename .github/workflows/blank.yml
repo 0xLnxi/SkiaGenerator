@@ -116,11 +116,9 @@ jobs:
       run: |
         # 安装Xcode命令行工具
         xcode-select --install 2>/dev/null || true
-        # 安装ninja构建工具和其他依赖
+        # 安装ninja构建工具
         brew install ninja || true
-        # 安装HarfBuzz库（如果启用的话）
-        # brew install harfbuzz || true
-        echo "使用Skia内置的HarfBuzz库"
+        echo "使用Skia内置的依赖库"
         
     # 安装Windows系统依赖
     - name: 安装Windows系统依赖
@@ -179,8 +177,6 @@ jobs:
         args="$args skia_enable_skshaper=true"
         args="$args skia_enable_svg=true"
         args="$args skia_enable_tools=true"
-        args="$args skia_use_dng_sdk=true"
-        args="$args skia_use_piex=true"
         args="$args skia_use_icu=true"
         
         # 启用GPU后端支持
@@ -196,13 +192,15 @@ jobs:
         # 根据不同平台设置特定参数
         case "${{ matrix.target_os }}" in
           "win")
-            # Windows平台特定配置
+            # Windows平台特定配置 - 禁用有问题的DNG SDK
             args="$args skia_use_angle=true"
             args="$args skia_use_direct3d=true"
             args="$args skia_use_freetype=true"
             args="$args skia_use_system_freetype2=false"
             args="$args skia_use_harfbuzz=true"
             args="$args skia_use_system_harfbuzz=false"
+            args="$args skia_use_dng_sdk=false"
+            args="$args skia_use_piex=false"
             if [ "${{ matrix.target_cpu }}" = "arm64" ]; then
               args="$args target_cpu=\"arm64\""
             fi
@@ -217,6 +215,8 @@ jobs:
             args="$args skia_use_harfbuzz=true"
             args="$args skia_use_system_harfbuzz=false"
             args="$args skia_pdf_subset_harfbuzz=true"
+            args="$args skia_use_dng_sdk=true"
+            args="$args skia_use_piex=true"
             if [ "${{ matrix.target_cpu }}" = "arm64" ]; then
               args="$args target_cpu=\"arm64\""
             fi
@@ -227,6 +227,8 @@ jobs:
             args="$args skia_use_freetype=true"
             args="$args skia_use_fontconfig=true"
             args="$args skia_use_harfbuzz=true"
+            args="$args skia_use_dng_sdk=true"
+            args="$args skia_use_piex=true"
             if [ "${{ matrix.target_cpu }}" = "arm64" ]; then
               args="$args cc=\"aarch64-linux-gnu-gcc\""
               args="$args cxx=\"aarch64-linux-gnu-g++\""
@@ -247,6 +249,8 @@ jobs:
             args="$args skia_use_vulkan=true"
             args="$args skia_use_harfbuzz=true"
             args="$args skia_use_system_harfbuzz=false"
+            args="$args skia_use_dng_sdk=true"
+            args="$args skia_use_piex=true"
             ;;
         esac
         
@@ -343,14 +347,15 @@ jobs:
         特殊说明:
         - 使用内置FreeType和HarfBuzz库以避免系统依赖冲突
         - 所有依赖都已静态链接
-        - 支持完整的PDF子集功能
+        - Windows平台为避免C++17兼容性问题禁用了DNG SDK
+        - 其他平台支持完整的DNG RAW图像处理
         EOF
         
         # 创建使用说明文件
         cat > package/README.md << EOF
         # Skia 完整构建包 - ${{ matrix.platform }}
 
-        这是Skia图形库的完整预编译构建包，包含所有功能模块。
+        这是Skia图形库的完整预编译构建包，包含所有主要功能模块。
 
         ## 包含内容
 
@@ -363,7 +368,7 @@ jobs:
 
         ## 支持的功能
 
-        此完整构建包含Skia的所有功能：
+        此完整构建包含Skia的主要功能：
         
         ### 核心渲染功能
         - 2D绘图和路径渲染
@@ -384,6 +389,7 @@ jobs:
         - 复杂文本布局和整形（内置HarfBuzz）
         - 多种字体格式支持（内置FreeType）
         - 完整的图像编解码器
+        - DNG RAW图像处理（除Windows外）
         
         ### 工具和实用程序
         - 性能基准测试工具
@@ -405,6 +411,17 @@ jobs:
         1. 添加include目录到编译器包含路径
         2. 链接lib目录中的所有库文件
         3. 根据平台链接相应的系统库
+
+        ## 平台特殊说明
+
+        ### Windows平台
+        - 为保证C++17兼容性，禁用了DNG SDK支持
+        - 完整支持其他所有功能
+        - 如需DNG支持，请考虑其他平台或自行编译
+
+        ### 其他平台
+        - 支持完整功能包括DNG RAW图像处理
+        - 使用内置依赖库保证兼容性
 
         ## 平台信息
 
@@ -655,6 +672,11 @@ jobs:
         message(STATUS "  - 支持GPU渲染: OpenGL + Vulkan")
         message(STATUS "  - 支持完整功能: PDF, SVG, Skottie")
         message(STATUS "  - 字体和文本: 内置FreeType + HarfBuzz")
+        if(WIN32)
+            message(STATUS "  - 注意: Windows平台已禁用DNG SDK以保证C++17兼容性")
+        else()
+            message(STATUS "  - DNG RAW图像: 完整支持")
+        endif()
         
         # 创建便捷的配置检查函数
         function(check_skia_features)
@@ -667,6 +689,11 @@ jobs:
             message(STATUS "  ✓ 高级文本处理 (HarfBuzz)")
             message(STATUS "  ✓ 图像编解码")
             message(STATUS "  ✓ 内置字体和文本引擎")
+            if(NOT WIN32)
+                message(STATUS "  ✓ DNG RAW图像处理")
+            else()
+                message(STATUS "  ⚠ DNG RAW图像处理 (已禁用)")
+            endif()
         endfunction()
         
         # 自动调用功能检查
@@ -770,7 +797,7 @@ jobs:
         cat > RELEASE_NOTES.md << 'EOF'
         # Skia 完整多平台构建包
 
-        这个发布包包含了Skia图形库在多个平台和架构上的完整预编译版本，支持所有功能模块。
+        这个发布包包含了Skia图形库在多个平台和架构上的完整预编译版本，支持主要功能模块。
 
         ## 包含的平台
 
@@ -822,6 +849,17 @@ jobs:
         - **复杂文本布局** - 内置HarfBuzz文本整形引擎
         - **多语言字体** - 内置FreeType字体渲染引擎
         - **图像编解码** - 支持多种图像格式
+        - **DNG RAW图像** - RAW图像处理（除Windows平台外）
+
+        ## 平台特殊说明
+
+        ### Windows平台限制
+        由于DNG SDK库在C++17标准下存在兼容性问题（使用了已废弃的std::auto_ptr），Windows平台已禁用DNG SDK支持以确保构建稳定性。如果需要DNG支持，建议：
+        - 使用其他平台的构建包
+        - 或自行修复DNG SDK的C++17兼容性问题
+
+        ### 其他平台
+        macOS、Linux和Android平台支持完整功能，包括DNG RAW图像处理。
 
         ## CMake集成
 
@@ -840,7 +878,7 @@ jobs:
         - **构建模式**: Release（完整优化构建）
         - **依赖处理**: 静态链接，使用内置FreeType和HarfBuzz
         - **图形后端**: OpenGL + Vulkan + 平台原生API
-        - **功能完整性**: 包含所有Skia模块和功能
+        - **功能完整性**: 包含除Windows DNG外的所有Skia模块
         - **跨平台一致性**: 内置依赖库确保渲染一致性
 
         ## 性能特性
@@ -877,7 +915,7 @@ jobs:
 
         ## 技术支持
 
-        如有问题，请查看包内的README.md文件或参考Skia官方文档。
+        如有问题，请查看包内的README.md文件或参考Skia官方文档。如需Windows平台的DNG支持，建议使用其他平台的构建包。
         EOF
         
     # 获取发布标签
@@ -915,13 +953,14 @@ jobs:
       run: |
         echo "🎉 Skia完整功能多平台构建完成！"
         echo "📦 已生成以下平台的构建包："
-        echo "   • Windows: x64, ARM64"  
-        echo "   • macOS: x64, ARM64"
-        echo "   • Linux: x64, ARM64"
-        echo "   • Android: x64, ARM64"
+        echo "   • Windows: x64, ARM64（禁用DNG SDK）"  
+        echo "   • macOS: x64, ARM64（完整功能）"
+        echo "   • Linux: x64, ARM64（完整功能）"
+        echo "   • Android: x64, ARM64（完整功能）"
         echo "🔗 可在Actions页面下载，或在Releases中获取"
         echo "📋 每个包都包含完整CMakeLists.txt，提供skia::skia目标"
         echo "🎮 支持OpenGL和Vulkan GPU后端"
         echo "✨ 包含PDF、SVG、Skottie等完整功能"
         echo "🔤 使用内置FreeType和HarfBuzz引擎，无系统依赖"
         echo "📄 PDF导出支持字体子集功能"
+        echo "⚠️  Windows平台已禁用DNG SDK以避免C++17兼容性问题"
