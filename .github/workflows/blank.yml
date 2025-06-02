@@ -172,9 +172,8 @@ jobs:
         args="$args skia_use_system_libwebp=false"
         args="$args skia_use_system_zlib=false"
         
-        # 启用全量功能支持，但使用内置依赖库
+        # 启用核心功能支持，使用内置依赖库
         args="$args skia_enable_pdf=true"
-        args="$args skia_enable_skottie=true"
         args="$args skia_enable_skshaper=true"
         args="$args skia_enable_svg=true"
         args="$args skia_use_icu=true"
@@ -195,7 +194,7 @@ jobs:
         # 根据不同平台设置特定参数
         case "${{ matrix.target_os }}" in
           "win")
-            # Windows平台特定配置 - 禁用有问题的DNG SDK
+            # Windows平台特定配置 - 禁用有问题的模块
             args="$args skia_use_angle=true"
             args="$args skia_use_direct3d=true"
             args="$args skia_use_freetype=true"
@@ -204,14 +203,14 @@ jobs:
             args="$args skia_use_system_harfbuzz=false"
             args="$args skia_use_dng_sdk=false"
             args="$args skia_use_piex=false"
+            args="$args skia_enable_skottie=true"
             if [ "${{ matrix.target_cpu }}" = "arm64" ]; then
               args="$args target_cpu=\"arm64\""
             fi
             ;;
           "mac")
-            # macOS平台特定配置 - 使用内置库避免系统库冲突
+            # macOS平台特定配置 - 禁用Skottie以避免链接问题
             args="$args skia_use_metal=true"
-            args="$args skia_enable_skottie=true"
             args="$args skia_use_freetype=true"
             args="$args skia_use_system_freetype2=false"
             args="$args skia_use_fontconfig=false"
@@ -220,6 +219,8 @@ jobs:
             args="$args skia_pdf_subset_harfbuzz=true"
             args="$args skia_use_dng_sdk=true"
             args="$args skia_use_piex=true"
+            # 在macOS上暂时禁用Skottie避免链接问题
+            args="$args skia_enable_skottie=false"
             if [ "${{ matrix.target_cpu }}" = "arm64" ]; then
               args="$args target_cpu=\"arm64\""
             fi
@@ -232,6 +233,7 @@ jobs:
             args="$args skia_use_harfbuzz=true"
             args="$args skia_use_dng_sdk=true"
             args="$args skia_use_piex=true"
+            args="$args skia_enable_skottie=true"
             if [ "${{ matrix.target_cpu }}" = "arm64" ]; then
               args="$args cc=\"aarch64-linux-gnu-gcc\""
               args="$args cxx=\"aarch64-linux-gnu-g++\""
@@ -244,7 +246,7 @@ jobs:
             fi
             ;;
           "android")
-            # Android平台特定配置 - 禁用工具构建
+            # Android平台特定配置
             args="$args ndk=\"$ANDROID_NDK_ROOT\""
             args="$args skia_use_system_freetype2=false"
             args="$args skia_use_freetype=true"
@@ -254,6 +256,7 @@ jobs:
             args="$args skia_use_system_harfbuzz=false"
             args="$args skia_use_dng_sdk=true"
             args="$args skia_use_piex=true"
+            args="$args skia_enable_skottie=true"
             ;;
         esac
         
@@ -336,7 +339,6 @@ jobs:
         - GPU渲染 (OpenGL + Vulkan)
         - PDF导出 (内置HarfBuzz)
         - SVG支持
-        - Skottie动画
         - 文本整形 (内置HarfBuzz)
         - 字体管理 (内置FreeType)
         - 图像编解码
@@ -352,13 +354,18 @@ jobs:
         - 静态库位于 lib/ 目录
         - CMake默认链接动态库
         - 使用内置依赖避免系统库冲突
+        
+        平台特殊说明:
+        - macOS平台为避免链接问题暂时禁用了Skottie模块
+        - 其他平台支持完整功能包括Skottie动画
+        - 所有平台都支持核心2D渲染和GPU加速
         EOF
         
         # 创建使用说明文件
         cat > package/README.md << EOF
         # Skia 动态库构建包 - ${{ matrix.platform }}
 
-        这是Skia图形库的动态库预编译构建包，包含完整功能模块。
+        这是Skia图形库的动态库预编译构建包，包含核心功能模块。
 
         ## 包含内容
 
@@ -402,10 +409,13 @@ jobs:
         ### 高级功能
         - PDF文档生成和导出
         - SVG矢量图形支持
-        - Skottie Lottie动画播放
         - 复杂文本布局和整形
         - 多种字体格式支持
         - 完整的图像编解码器
+        
+        ### 动画功能
+        - Skottie Lottie动画（除macOS外）
+        - macOS平台暂时不支持Skottie以确保构建稳定性
 
         ## CMake使用方法
 
@@ -421,16 +431,16 @@ jobs:
         - 自动设置运行时库路径
         - 跨平台库文件格式自动适配
 
-        ## 手动使用方法
+        ## 平台特殊说明
 
-        ### 编译时
-        1. 添加include目录到编译器包含路径
-        2. 链接bin目录中的动态库
+        ### macOS平台
+        - 为确保构建稳定性，暂时禁用了Skottie动画模块
+        - 支持所有其他功能包括Metal GPU渲染
+        - 如需Skottie支持，请使用其他平台或自行编译
 
-        ### 运行时
-        - Windows: 确保.dll文件在PATH中或程序目录
-        - macOS: 设置DYLD_LIBRARY_PATH或使用rpath
-        - Linux: 设置LD_LIBRARY_PATH或使用rpath
+        ### 其他平台
+        - 支持完整功能包括Skottie动画
+        - 提供最佳的功能完整性
 
         ## 平台信息
 
@@ -519,7 +529,6 @@ jobs:
             # Windows优先使用动态库（DLL + 导入库）
             if(SKIA_DYNAMIC_LIBRARIES AND SKIA_IMPORT_LIBRARIES)
                 target_link_libraries(skia INTERFACE ${SKIA_IMPORT_LIBRARIES})
-                # 设置运行时路径
                 set_target_properties(skia PROPERTIES
                     INTERFACE_LINK_DIRECTORIES "${SKIA_ROOT_DIR}/bin"
                 )
@@ -543,14 +552,13 @@ jobs:
                 SK_GL=1
                 SK_VULKAN=1
                 SK_BUILD_FOR_MAC=1
-                SK_ENABLE_SKOTTIE=1
                 SK_ENABLE_SVG=1
+                # 注意：macOS版本暂不支持Skottie
             )
             
             # macOS优先使用动态库
             if(SKIA_DYNAMIC_LIBRARIES)
                 target_link_libraries(skia INTERFACE ${SKIA_DYNAMIC_LIBRARIES})
-                # 设置rpath
                 target_link_options(skia INTERFACE 
                     "-Wl,-rpath,${SKIA_ROOT_DIR}/bin"
                     "-Wl,-rpath,@loader_path"
@@ -617,7 +625,6 @@ jobs:
             # Linux优先使用动态库
             if(SKIA_DYNAMIC_LIBRARIES)
                 target_link_libraries(skia INTERFACE ${SKIA_DYNAMIC_LIBRARIES})
-                # 设置rpath
                 target_link_options(skia INTERFACE 
                     "-Wl,-rpath,${SKIA_ROOT_DIR}/bin"
                     "-Wl,-rpath,$ORIGIN"
@@ -687,9 +694,14 @@ jobs:
         message(STATUS "  - 动态库目录: ${SKIA_ROOT_DIR}/bin")
         message(STATUS "  - 静态库目录: ${SKIA_ROOT_DIR}/lib")
         message(STATUS "  - 支持GPU渲染: OpenGL + Vulkan")
-        message(STATUS "  - 支持核心功能: PDF, SVG, Skottie")
+        message(STATUS "  - 支持核心功能: PDF, SVG")
         message(STATUS "  - 字体和文本: 内置FreeType + HarfBuzz")
         message(STATUS "  - 库类型: 动态库优先，静态库备用")
+        if(APPLE)
+            message(STATUS "  - 注意: macOS版本暂不包含Skottie模块")
+        else()
+            message(STATUS "  - 动画支持: Skottie Lottie动画")
+        endif()
         
         # 创建便捷的配置检查函数
         function(check_skia_features)
@@ -698,11 +710,15 @@ jobs:
             message(STATUS "  ✓ GPU加速 (OpenGL/Vulkan)")
             message(STATUS "  ✓ PDF文档生成")
             message(STATUS "  ✓ SVG矢量图形")
-            message(STATUS "  ✓ Skottie动画")
             message(STATUS "  ✓ 高级文本处理")
             message(STATUS "  ✓ 图像编解码")
             message(STATUS "  ✓ 动态库链接")
             message(STATUS "  ✓ 运行时路径配置")
+            if(NOT APPLE)
+                message(STATUS "  ✓ Skottie动画支持")
+            else()
+                message(STATUS "  ⚠ Skottie动画 (暂不支持)")
+            endif()
         endfunction()
         
         # 自动调用功能检查
@@ -825,7 +841,7 @@ jobs:
         cat > RELEASE_NOTES.md << 'EOF'
         # Skia 动态库多平台构建包
 
-        这个发布包包含了Skia图形库在多个平台和架构上的动态库预编译版本，专注于易用性和灵活部署。
+        这个发布包包含了Skia图形库在多个平台和架构上的动态库预编译版本，针对稳定性和兼容性进行了优化。
 
         ## 包含的平台
 
@@ -888,11 +904,18 @@ jobs:
         ### 高级功能
         - **PDF文档生成** - 完整的PDF导出功能，支持字体子集
         - **SVG矢量图形** - SVG文件解析和渲染
-        - **Skottie动画** - Lottie格式动画播放
         - **复杂文本布局** - 内置HarfBuzz文本整形引擎
         - **多语言字体** - 内置FreeType字体渲染引擎
         - **图像编解码** - 支持多种图像格式
         - **DNG RAW图像** - RAW图像处理（除Windows平台外）
+
+        ### 平台特殊功能支持
+
+        #### Skottie动画支持
+        - **Windows**: ✅ 完整支持Skottie Lottie动画
+        - **Linux**: ✅ 完整支持Skottie Lottie动画  
+        - **Android**: ✅ 完整支持Skottie Lottie动画
+        - **macOS**: ❌ 暂时禁用（为确保构建稳定性）
 
         ## CMake集成（推荐方式）
 
@@ -905,12 +928,6 @@ jobs:
         target_link_libraries(your_target skia::skia)
         ```
 
-        ### 高级用法
-        ```cmake
-        # Windows下自动复制DLL到输出目录
-        copy_skia_dlls(your_target)
-        ```
-
         ### CMake自动特性
         - ✅ **优先链接动态库** - 自动检测并使用bin目录中的动态库
         - ✅ **自动设置运行时路径** - 配置rpath/runpath
@@ -918,32 +935,25 @@ jobs:
         - ✅ **依赖管理** - 自动链接所需的系统库
         - ✅ **备用静态库** - 动态库不可用时自动回退到静态库
 
-        ## 手动集成方法
+        ## 平台特殊说明
 
-        ### 编译阶段
-        ```bash
-        # 添加头文件路径
-        -I/path/to/skia/include
+        ### macOS平台限制
+        由于Skottie模块在macOS平台存在链接器符号冲突问题，当前版本已禁用Skottie支持以确保构建稳定性。
 
-        # 链接动态库
-        # Windows
-        -L/path/to/skia/lib -lskia  # 链接导入库
+        **macOS平台支持的功能：**
+        - ✅ 完整的2D渲染和GPU加速
+        - ✅ PDF文档生成
+        - ✅ SVG矢量图形
+        - ✅ Metal GPU渲染
+        - ✅ 高级文本处理
+        - ❌ Skottie动画（暂时禁用）
 
-        # macOS/Linux
-        -L/path/to/skia/bin -lskia  # 链接动态库
-        ```
+        **解决方案：**
+        - 使用其他平台的构建包以获得Skottie支持
+        - 或者等待未来版本的修复
 
-        ### 运行时配置
-        ```bash
-        # Windows - 将DLL放在PATH中或程序目录
-        copy skia/bin/*.dll program_directory/
-
-        # macOS - 设置库路径
-        export DYLD_LIBRARY_PATH=/path/to/skia/bin
-
-        # Linux - 设置库路径
-        export LD_LIBRARY_PATH=/path/to/skia/bin
-        ```
+        ### 其他平台
+        Windows、Linux和Android平台支持完整功能，包括Skottie动画支持。
 
         ## 部署指南
 
@@ -957,13 +967,6 @@ jobs:
         2. **macOS**: 使用`install_name_tool`配置rpath或bundle库文件
         3. **Linux**: 配置LD_LIBRARY_PATH或使用rpath
         4. **Android**: 将.so文件打包到APK的lib目录
-
-        ### Docker/容器化
-        ```dockerfile
-        # 复制Skia动态库
-        COPY skia/bin/* /usr/local/lib/
-        RUN ldconfig  # Linux更新动态库缓存
-        ```
 
         ## 性能特性
 
@@ -980,13 +983,12 @@ jobs:
         1. **优先使用CMake** - 自动处理复杂的链接配置
         2. **测试运行时路径** - 确保程序能找到动态库
         3. **版本管理** - 注意动态库版本兼容性
-        4. **性能监控** - 监控动态库加载性能
+        4. **功能选择** - 根据平台选择合适的功能
         5. **备用方案** - 准备静态库作为备选
 
-        ### 故障排除
-        - **Windows**: 使用Dependency Walker检查DLL依赖
-        - **macOS**: 使用`otool -L`检查dylib依赖
-        - **Linux**: 使用`ldd`检查so依赖
+        ### 动画功能建议
+        - **需要Skottie**: 优先选择Windows、Linux或Android平台
+        - **macOS开发**: 考虑使用其他动画库或等待后续版本
 
         ## 兼容性
 
@@ -1000,11 +1002,11 @@ jobs:
 
         ## 自动更新
 
-        此构建包每天自动更新，确保包含最新的稳定Skia代码。动态库版本兼容性请参考发布说明。
+        此构建包每天自动更新，确保包含最新的稳定Skia代码。我们会持续监控macOS平台的Skottie问题并在后续版本中修复。
 
         ## 技术支持
 
-        如有问题，请查看包内的README.md文件。动态库使用问题请检查运行时路径配置。
+        如有问题，请查看包内的README.md文件。macOS平台的Skottie问题将在后续版本中解决。
         EOF
         
     # 获取发布标签
@@ -1042,15 +1044,16 @@ jobs:
       run: |
         echo "🎉 Skia动态库多平台构建完成！"
         echo "📦 已生成以下平台的动态库构建包："
-        echo "   • Windows: x64, ARM64 (DLL + 导入库)"  
-        echo "   • macOS: x64, ARM64 (dylib)"
-        echo "   • Linux: x64, ARM64 (so)"
-        echo "   • Android: x64, ARM64 (so)"
+        echo "   • Windows: x64, ARM64 (完整功能包括Skottie)"  
+        echo "   • macOS: x64, ARM64 (除Skottie外的完整功能)"
+        echo "   • Linux: x64, ARM64 (完整功能包括Skottie)"
+        echo "   • Android: x64, ARM64 (完整功能包括Skottie)"
         echo "🔗 可在Actions页面下载，或在Releases中获取"
         echo "📋 每个包都包含动态库优先的CMakeLists.txt配置"
         echo "🎮 支持OpenGL和Vulkan GPU后端"
-        echo "✨ 包含PDF、SVG、Skottie等核心功能"
+        echo "✨ 包含PDF、SVG等核心功能"
         echo "🔤 使用内置字体和文本引擎，无系统依赖"
         echo "📄 PDF导出支持字体子集功能"
         echo "🚀 动态库优化，便于部署和维护"
         echo "📁 动态库位于bin目录，CMake自动链接"
+        echo "⚠️  macOS平台暂时禁用Skottie以确保构建稳定性"
