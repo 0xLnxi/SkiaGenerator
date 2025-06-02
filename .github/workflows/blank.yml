@@ -285,14 +285,29 @@ jobs:
         mkdir -p package/bin
         mkdir -p package/docs
         mkdir -p package/examples
+        mkdir -p package/modules
         
         # 复制头文件到包目录
         cp -r include/* package/include/
         
-        # 复制模块相关头文件
+        # 复制modules目录到包根目录以支持 "modules/skcms/skcms.h" 引用
         if [ -d "modules" ]; then
-          mkdir -p package/include/modules
-          cp -r modules/*/include/* package/include/modules/ 2>/dev/null || true
+          cp -r modules/* package/modules/ 2>/dev/null || true
+        fi
+        
+        # 复制third_party中的modules相关文件
+        if [ -d "third_party" ]; then
+          mkdir -p package/third_party
+          # 复制skcms模块
+          if [ -d "third_party/skcms" ]; then
+            cp -r third_party/skcms package/third_party/ 2>/dev/null || true
+          fi
+          # 复制其他可能需要的third_party模块
+          find third_party -name "*.h" -o -name "*.hpp" | while read file; do
+            dir=$(dirname "$file")
+            mkdir -p "package/$dir"
+            cp "$file" "package/$file" 2>/dev/null || true
+          done
         fi
         
         # 根据不同平台复制相应的库文件和可执行文件
@@ -339,6 +354,7 @@ jobs:
         - 文本整形 (内置HarfBuzz)
         - 字体管理 (内置FreeType)
         - 图像编解码
+        - 颜色管理 (skcms模块)
         
         图形后端:
         - OpenGL/OpenGL ES
@@ -351,18 +367,21 @@ jobs:
         - 所有依赖都已静态链接
         - Windows平台为避免C++17兼容性问题禁用了DNG SDK
         - 为保证构建稳定性已禁用调试工具构建
-        - 头文件路径已配置支持源码include格式
+        - 头文件路径已配置支持源码include格式和模块引用
+        - 包含完整的modules和third_party依赖
         EOF
         
         # 创建使用说明文件
         cat > package/README.md << EOF
         # Skia 完整构建包 - ${{ matrix.platform }}
 
-        这是Skia图形库的完整预编译构建包，包含所有核心功能模块。
+        这是Skia图形库的完整预编译构建包，包含所有核心功能模块和依赖。
 
         ## 包含内容
 
         - include/ - 完整的Skia C++ API头文件
+        - modules/ - Skia模块文件（包含skcms等）
+        - third_party/ - 第三方依赖头文件
         - lib/ - 静态库和动态库文件
         - bin/ - 可执行文件（如果有）
         - examples/ - 示例资源文件
@@ -378,6 +397,7 @@ jobs:
         - 图像处理和滤镜效果
         - GPU加速渲染
         - 多线程渲染支持
+        - 颜色管理和色彩空间转换
         
         ### 图形后端
         - OpenGL/OpenGL ES
@@ -405,7 +425,7 @@ jobs:
 
         ## 源码include格式支持
 
-        此构建包已配置支持源码中的include格式：
+        此构建包已配置支持源码中的include格式，包括模块依赖：
         \`\`\`cpp
         #include <include/core/SkImageInfo.h>
         #include <include/core/SkImage.h>
@@ -419,6 +439,12 @@ jobs:
         #include <include/gpu/ganesh/gl/GrGLBackendSurface.h>
         #include <include/gpu/ganesh/gl/GrGLDirectContext.h>
         #include <include/gpu/ganesh/gl/GrGLInterface.h>
+        \`\`\`
+
+        模块依赖也被正确支持：
+        \`\`\`cpp
+        #include "modules/skcms/skcms.h"     // 颜色管理
+        #include "modules/skshaper/include/SkShaper.h"  // 文本整形
         \`\`\`
 
         ## 手动集成方法
@@ -436,6 +462,7 @@ jobs:
         - 专注于核心渲染功能
         - 适合生产环境使用
         - 头文件路径已正确配置
+        - 包含完整的模块和第三方依赖
 
         ## 平台信息
 
@@ -451,6 +478,7 @@ jobs:
         - 启用多线程可提升复杂场景渲染速度
         - 内置FreeType和HarfBuzz确保跨平台文本渲染一致性
         - PDF导出支持字体子集，可减小文件大小
+        - skcms模块提供高效的颜色管理
         EOF
         
       shell: bash
@@ -460,7 +488,7 @@ jobs:
       run: |
         cd skia/package
         
-        # 生成CMakeLists.txt文件，确保正确的包含路径
+        # 生成CMakeLists.txt文件，确保正确的包含路径和模块支持
         cat > CMakeLists.txt << 'EOF'
         # Skia完整图形库的CMake配置文件
         cmake_minimum_required(VERSION 3.15)
@@ -483,13 +511,15 @@ jobs:
         add_library(skia INTERFACE)
         add_library(skia::skia ALIAS skia)
         
-        # 设置包含目录 - 重要：设置Skia根目录以支持源码include格式
-        # 这样就可以使用 #include <include/core/SkImageInfo.h> 格式
+        # 设置包含目录 - 重要：设置Skia根目录以支持源码include格式和模块依赖
+        # 这样就可以使用 #include <include/core/SkImageInfo.h> 和 "modules/skcms/skcms.h" 格式
         target_include_directories(skia INTERFACE
             $<BUILD_INTERFACE:${SKIA_ROOT_DIR}>
-            $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/include/modules>
+            $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/modules>
+            $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/third_party>
             $<INSTALL_INTERFACE:.>
-            $<INSTALL_INTERFACE:include/modules>
+            $<INSTALL_INTERFACE:modules>
+            $<INSTALL_INTERFACE:third_party>
         )
         
         # 查找所有的库文件
@@ -682,12 +712,14 @@ jobs:
         message(STATUS "Skia完整预编译库配置完成")
         message(STATUS "  - Skia根目录: ${SKIA_ROOT_DIR}")
         message(STATUS "  - 包含路径已配置支持源码include格式")
-        message(STATUS "  - 模块包含目录: ${SKIA_ROOT_DIR}/include/modules")
+        message(STATUS "  - 模块目录: ${SKIA_ROOT_DIR}/modules")
+        message(STATUS "  - 第三方依赖: ${SKIA_ROOT_DIR}/third_party")
         message(STATUS "  - 库目录: ${SKIA_ROOT_DIR}/lib")
         message(STATUS "  - 找到库文件数量: " ${SKIA_LIBRARIES})
         message(STATUS "  - 支持GPU渲染: OpenGL + Vulkan")
         message(STATUS "  - 支持核心功能: PDF, SVG, Skottie")
         message(STATUS "  - 字体和文本: 内置FreeType + HarfBuzz")
+        message(STATUS "  - 颜色管理: skcms模块")
         if(WIN32)
             message(STATUS "  - 注意: Windows平台已禁用DNG SDK以保证C++17兼容性")
         else()
@@ -706,7 +738,9 @@ jobs:
             message(STATUS "  ✓ 高级文本处理 (HarfBuzz)")
             message(STATUS "  ✓ 图像编解码")
             message(STATUS "  ✓ 内置字体和文本引擎")
+            message(STATUS "  ✓ 颜色管理 (skcms)")
             message(STATUS "  ✓ 源码include格式支持")
+            message(STATUS "  ✓ 模块依赖支持")
             if(NOT WIN32)
                 message(STATUS "  ✓ DNG RAW图像处理")
             endif()
@@ -720,6 +754,7 @@ jobs:
         function(skia_usage_example)
             message(STATUS "")
             message(STATUS "Skia使用示例 - 支持的include格式:")
+            message(STATUS "  // 核心头文件")
             message(STATUS "  #include <include/core/SkImageInfo.h>")
             message(STATUS "  #include <include/core/SkImage.h>")
             message(STATUS "  #include <include/core/SkData.h>")
@@ -727,11 +762,15 @@ jobs:
             message(STATUS "  #include <include/core/SkTypeface.h>")
             message(STATUS "  #include <include/core/SkFontMgr.h>")
             message(STATUS "  #include <include/core/SkTextBlob.h>")
+            message(STATUS "  // GPU相关头文件")
             message(STATUS "  #include <include/gpu/ganesh/GrDirectContext.h>")
             message(STATUS "  #include <include/gpu/ganesh/GrBackendSurface.h>")
             message(STATUS "  #include <include/gpu/ganesh/gl/GrGLBackendSurface.h>")
             message(STATUS "  #include <include/gpu/ganesh/gl/GrGLDirectContext.h>")
             message(STATUS "  #include <include/gpu/ganesh/gl/GrGLInterface.h>")
+            message(STATUS "  // 模块依赖")
+            message(STATUS "  #include \"modules/skcms/skcms.h\"")
+            message(STATUS "  #include \"modules/skshaper/include/SkShaper.h\"")
             message(STATUS "")
         endfunction()
         
@@ -836,7 +875,7 @@ jobs:
         cat > RELEASE_NOTES.md << 'EOF'
         # Skia 生产级多平台构建包
 
-        这个发布包包含了Skia图形库在多个平台和架构上的生产级预编译版本，专注于核心功能和稳定性，支持标准源码include格式。
+        这个发布包包含了Skia图形库在多个平台和架构上的生产级预编译版本，专注于核心功能和稳定性，完整支持模块依赖和源码include格式。
 
         ## 包含的平台
 
@@ -858,7 +897,9 @@ jobs:
 
         ## 每个包都包含
 
-        - include/ - 完整的Skia C++ API头文件和模块头文件
+        - include/ - 完整的Skia C++ API头文件
+        - modules/ - Skia模块文件（包含skcms、skshaper等）
+        - third_party/ - 第三方依赖头文件
         - lib/ - 静态库和动态库文件
         - bin/ - 可执行文件（如果有）
         - examples/ - 示例资源文件
@@ -868,8 +909,9 @@ jobs:
 
         ## 源码Include格式支持
 
-        此构建包已正确配置CMake包含路径，完美支持Skia源码中的标准include格式：
+        此构建包已正确配置CMake包含路径，完美支持Skia源码中的标准include格式和模块依赖：
 
+        ### 核心头文件
         ```cpp
         #include <include/core/SkImageInfo.h>
         #include <include/core/SkImage.h>
@@ -883,6 +925,14 @@ jobs:
         #include <include/gpu/ganesh/gl/GrGLBackendSurface.h>
         #include <include/gpu/ganesh/gl/GrGLDirectContext.h>
         #include <include/gpu/ganesh/gl/GrGLInterface.h>
+        ```
+
+        ### 模块依赖
+        ```cpp
+        #include "modules/skcms/skcms.h"                    // 颜色管理
+        #include "modules/skshaper/include/SkShaper.h"      // 文本整形
+        #include "modules/skottie/include/Skottie.h"        // 动画支持
+        #include "modules/svg/include/SkSVGDOM.h"           // SVG支持
         ```
 
         ## 核心功能支持
@@ -907,11 +957,12 @@ jobs:
         - **复杂文本布局** - 内置HarfBuzz文本整形引擎
         - **多语言字体** - 内置FreeType字体渲染引擎
         - **图像编解码** - 支持多种图像格式
+        - **颜色管理** - skcms模块提供精确的色彩转换
         - **DNG RAW图像** - RAW图像处理（除Windows平台外）
 
         ## CMake集成
 
-        每个构建包都包含了完整的CMakeLists.txt文件，已正确配置include路径：
+        每个构建包都包含了完整的CMakeLists.txt文件，已正确配置include路径和模块依赖：
 
         ```cmake
         # 添加Skia子目录
@@ -921,14 +972,19 @@ jobs:
         target_link_libraries(your_target skia::skia)
         ```
 
-        CMake会自动设置正确的包含路径，使你的代码可以直接使用源码格式的include语句。
+        CMake会自动设置正确的包含路径，包括：
+        - Skia根目录（支持 `#include <include/...>` 格式）
+        - modules目录（支持 `#include "modules/..."` 格式）
+        - third_party目录（支持第三方依赖）
 
         ## 手动集成
 
         如果不使用CMake，请确保：
-        1. 将Skia根目录（而不是include子目录）添加到编译器包含路径
-        2. 链接lib目录中的所有库文件
-        3. 根据平台链接相应的系统库
+        1. 将Skia根目录添加到编译器包含路径
+        2. 将modules目录添加到编译器包含路径
+        3. 将third_party目录添加到编译器包含路径
+        4. 链接lib目录中的所有库文件
+        5. 根据平台链接相应的系统库
 
         ## 生产级特性
 
@@ -937,13 +993,13 @@ jobs:
         - **API兼容性**: 避免实验性API和调试工具
         - **依赖管理**: 使用内置依赖库，避免系统冲突
         - **构建优化**: Release模式完整优化
-        - **include路径**: 正确配置支持源码格式
+        - **完整模块**: 包含所有必要的模块和依赖文件
 
-        ### 平台特殊说明
-        - **Windows**: 为保证C++17兼容性，已禁用DNG SDK
-        - **所有平台**: 已禁用调试工具构建以避免API兼容性问题
-        - **生产就绪**: 适合直接用于生产环境
-        - **路径兼容**: 完美支持源码include格式
+        ### 解决常见问题
+        - ✅ 修复了 `"modules/skcms/skcms.h": No such file or directory` 错误
+        - ✅ 包含完整的第三方依赖头文件
+        - ✅ 正确配置模块路径
+        - ✅ 支持所有源码include格式
 
         ## 性能特性
 
@@ -952,6 +1008,7 @@ jobs:
         - **内存优化**: 高效的内存管理
         - **缓存机制**: 智能的资源缓存
         - **文本优化**: 内置文本引擎提供最佳性能
+        - **颜色精度**: skcms提供高精度颜色管理
         - **PDF优化**: 支持字体子集，减小文件大小
 
         ## 使用建议
@@ -960,8 +1017,8 @@ jobs:
         2. **生产部署**: 此版本专为生产环境优化
         3. **性能调优**: 启用GPU渲染和多线程处理
         4. **文本处理**: 内置引擎无需额外配置
-        5. **跨平台**: 相同API在所有平台保持一致
-        6. **include格式**: 直接使用源码中的include语句
+        5. **颜色管理**: 利用skcms模块进行精确色彩转换
+        6. **跨平台**: 相同API在所有平台保持一致
 
         ## 兼容性
 
@@ -972,7 +1029,7 @@ jobs:
           - Android API 21+
         - **GPU要求**: 支持OpenGL 3.3+或Vulkan 1.0+的显卡
         - **依赖**: 无外部依赖，完全自包含
-        - **代码兼容**: 完美支持源码include格式
+        - **代码兼容**: 完美支持源码include格式和模块依赖
 
         ## 自动更新
 
@@ -980,7 +1037,7 @@ jobs:
 
         ## 技术支持
 
-        如有问题，请查看包内的README.md文件或参考Skia官方文档。如需调试工具或实验性功能，请考虑自行编译开发版本。
+        如有问题，请查看包内的README.md文件或参考Skia官方文档。此版本已解决常见的模块依赖问题，应该可以直接使用。
         EOF
         
     # 获取发布标签
@@ -1029,4 +1086,5 @@ jobs:
         echo "🔤 使用内置字体和文本引擎，无系统依赖"
         echo "📄 PDF导出支持字体子集功能"
         echo "🚀 生产环境就绪，稳定性优先"
-        echo "📁 完美支持源码include格式"
+        echo "📁 完美支持源码include格式和模块依赖"
+        echo "🎨 包含skcms颜色管理模块"
