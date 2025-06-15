@@ -93,7 +93,7 @@ jobs:
         lsb_release -a
         
         # 只安装核心编译器（避免包冲突）
-        sudo apt-get install -y gcc g++ clang clang++
+        sudo apt-get install -y gcc g++ clang-18 clang++-18 libc++-18-dev libc++abi-18-dev
         
         # 安装C++标准库开发包
         sudo apt-get install -y libc++-dev libc++abi-dev || echo "libc++ 安装失败，继续使用 libstdc++"
