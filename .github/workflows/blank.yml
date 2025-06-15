@@ -1,5 +1,5 @@
-# Skia Dawn WebGPU 全平台统一构建工作流 - 修正C++20兼容性问题
-name: 编译 Skia Dawn WebGPU 全平台构建包
+# Skia 全平台构建工作流（不包含Dawn WebGPU）
+name: 编译 Skia 全平台构建包
 
 on:
   push:
@@ -18,51 +18,51 @@ permissions:
   actions: read
 
 jobs:
-  build-skia-dawn-all:
+  build-skia:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Windows x64架构 - Dawn支持
+          # Windows x64架构
           - os: windows-latest
-            platform: x64_windows_dawn
+            platform: x64_windows
             arch: x64
             target_os: win
             target_cpu: x64
             
-          # macOS x64架构 - Dawn支持，使用最新macOS以获得更好的C++20支持
-          - os: macos-14
-            platform: x64_macos_dawn
+          # macOS x64架构
+          - os: macos-latest
+            platform: x64_macos
             arch: x64
             target_os: mac
             target_cpu: x64
             
-          # macOS ARM64架构 - Dawn支持，使用最新macOS以获得更好的C++20支持
-          - os: macos-14
-            platform: arm64_macos_dawn
+          # macOS ARM64架构
+          - os: macos-latest
+            platform: arm64_macos
             arch: arm64
             target_os: mac
             target_cpu: arm64
             
-          # Linux x64架构 - Dawn支持
+          # Linux x64架构
           - os: ubuntu-latest
-            platform: x64_linux_dawn
+            platform: x64_linux
             arch: x64
             target_os: linux
             target_cpu: x64
             
-          # Android x64架构 - Dawn支持
+          # Android x64架构
           - os: ubuntu-latest
-            platform: x64_android_dawn
+            platform: x64_android
             arch: x64
             target_os: android
             target_cpu: x64
             android_api: 21
             
-          # Android ARM64架构 - Dawn支持
+          # Android ARM64架构
           - os: ubuntu-latest
-            platform: arm64_android_dawn
+            platform: arm64_android
             arch: arm64
             target_os: android
             target_cpu: arm64
@@ -84,47 +84,29 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        # 安装基础构建工具 - 确保使用支持C++20的编译器
+        # 安装基础构建工具
         sudo apt-get install -y build-essential ninja-build
-        # 安装更新的GCC和G++以支持C++20
-        sudo apt-get install -y gcc-12 g++-12
-        # 设置默认编译器为支持C++20的版本
-        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100
-        sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100
-        # 验证编译器版本
-        gcc --version
-        g++ --version
         # 安装图形和字体相关依赖
         sudo apt-get install -y libfontconfig1-dev libfreetype6-dev libgl1-mesa-dev
         # 安装Vulkan开发库
         sudo apt-get install -y libvulkan-dev vulkan-tools
-        # 安装Dawn WebGPU所需的额外库
+        # 安装X11相关库
         sudo apt-get install -y libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
-        sudo apt-get install -y libwayland-dev libwayland-egl-backend-dev
-        sudo apt-get install -y libegl1-mesa-dev libgles2-mesa-dev
         # 安装ICU和HarfBuzz
         sudo apt-get install -y libicu-dev libharfbuzz-dev
         # 安装Java开发环境（Android构建需要）
         sudo apt-get install -y openjdk-11-jdk
         
-    # 安装macOS系统依赖并升级Xcode工具链
-    - name: 安装macOS系统依赖并升级工具链
+    # 安装macOS系统依赖
+    - name: 安装macOS系统依赖
       if: runner.os == 'macOS'
       run: |
         # 安装Xcode命令行工具
         xcode-select --install 2>/dev/null || true
         # 安装ninja构建工具
         brew install ninja || true
-        # 验证Xcode版本支持C++20
+        # 验证Xcode版本
         xcodebuild -version
-        # 检查clang版本以确保支持C++20
-        clang --version
-        # 确保我们有足够新的Xcode版本支持C++20的concepts
-        if xcodebuild -version | grep -q "Xcode 1[5-9]"; then
-          echo "✅ Xcode版本足够新，支持C++20"
-        else
-          echo "⚠️  Xcode版本可能较旧，但会尝试继续构建"
-        fi
         
     # 安装Windows系统依赖
     - name: 安装Windows系统依赖
@@ -132,7 +114,6 @@ jobs:
       run: |
         # 安装ninja构建工具
         choco install ninja -y
-        # Windows的MSVC默认支持C++20
         
     # 设置Android NDK环境（仅限Android平台）
     - name: 设置Android NDK
@@ -156,16 +137,16 @@ jobs:
         # 禁用depot_tools自动下载工具链
         echo "DEPOT_TOOLS_WIN_TOOLCHAIN=0" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
         
-    # 获取Skia源代码并同步依赖（包括Dawn）
-    - name: 获取Skia源代码和Dawn依赖
+    # 获取Skia源代码并同步依赖
+    - name: 获取Skia源代码
       run: |
         git clone https://skia.googlesource.com/skia.git
         cd skia
         python tools/git-sync-deps
       shell: bash
       
-    # 配置启用Dawn和Graphite后端的构建参数，根据平台启用对应后端
-    - name: 配置Dawn WebGPU和Graphite构建参数
+    # 配置Skia构建参数
+    - name: 配置Skia构建参数
       run: |
         cd skia
         
@@ -185,12 +166,10 @@ jobs:
         args="$args skia_enable_svg=true"
         args="$args skia_use_icu=true"
         
-        # 启用GPU后端支持 - 包含Dawn WebGPU和Graphite
+        # 启用GPU后端支持 - 不包含Dawn WebGPU
         args="$args skia_enable_gpu=true"
-        args="$args skia_enable_graphite=true"
         args="$args skia_use_gl=true"
         args="$args skia_use_vulkan=true"
-        args="$args skia_use_dawn=true"
         args="$args skia_enable_spirv_validation=false"
         
         # 禁用工具构建以避免测试工具API问题
@@ -200,10 +179,10 @@ jobs:
         args="$args target_os=\"${{ matrix.target_os }}\""
         args="$args target_cpu=\"${{ matrix.target_cpu }}\""
         
-        # 根据不同平台设置特定参数和Dawn后端，包括C++20支持
+        # 根据不同平台设置特定参数
         case "${{ matrix.target_os }}" in
           "win")
-            # Windows平台特定配置 - 使用/MD运行时，启用Dawn D3D12后端，C++20支持
+            # Windows平台特定配置 - 使用/MD运行时
             args="$args skia_use_angle=true"
             args="$args skia_use_direct3d=true"
             args="$args skia_use_freetype=true"
@@ -212,21 +191,13 @@ jobs:
             args="$args skia_use_system_harfbuzz=false"
             args="$args skia_use_dng_sdk=false"
             args="$args skia_use_piex=false"
-            # 设置Windows使用/MD运行时（多线程DLL）和C++20
-            args="$args extra_cflags=[\"/MD\", \"/std:c++20\"]"
+            # 设置Windows使用/MD运行时（多线程DLL）
+            args="$args extra_cflags=[\"/MD\"]"
             args="$args extra_cflags_c=[\"/MD\"]"
-            args="$args extra_cflags_cc=[\"/MD\", \"/std:c++20\"]"
-            # Dawn Windows特定设置 - 只启用Windows后端
-            args="$args dawn_enable_d3d12=true"
-            args="$args dawn_enable_d3d11=true"
-            args="$args dawn_enable_vulkan=true"
-            args="$args dawn_enable_opengles=false"
-            args="$args dawn_enable_desktop_gl=false"
-            args="$args dawn_enable_metal=false"
-            args="$args dawn_enable_null=false"
+            args="$args extra_cflags_cc=[\"/MD\"]"
             ;;
           "mac")
-            # macOS平台特定配置 - 使用内置库避免系统库冲突，启用Dawn Metal后端，C++20支持
+            # macOS平台特定配置 - 使用内置库避免系统库冲突
             args="$args skia_use_metal=true"
             args="$args skia_enable_skottie=true"
             args="$args skia_use_freetype=true"
@@ -237,49 +208,23 @@ jobs:
             args="$args skia_pdf_subset_harfbuzz=true"
             args="$args skia_use_dng_sdk=true"
             args="$args skia_use_piex=true"
-            # 设置C++20支持，并强制使用更现代的语言特性
-            args="$args extra_cflags_cc=[\"-std=c++20\", \"-Wno-unknown-warning-option\", \"-Wno-c++20-compat\"]"
-            # 确保使用libc++（现代C++标准库）
-            args="$args extra_cflags_cc=[\"-std=c++20\", \"-stdlib=libc++\", \"-Wno-unknown-warning-option\"]"
-            args="$args extra_ldflags=[\"-stdlib=libc++\"]"
-            # Dawn macOS特定设置 - 只启用macOS后端
-            args="$args dawn_enable_metal=true"
-            args="$args dawn_enable_vulkan=false"
-            args="$args dawn_enable_opengles=false"
-            args="$args dawn_enable_desktop_gl=false"
-            args="$args dawn_enable_d3d12=false"
-            args="$args dawn_enable_d3d11=false"
-            args="$args dawn_enable_null=false"
             if [ "${{ matrix.target_cpu }}" = "arm64" ]; then
               args="$args target_cpu=\"arm64\""
             fi
             ;;
           "linux")
-            # Linux平台特定配置 - 启用Dawn Vulkan后端，C++20支持
+            # Linux平台特定配置
             args="$args skia_use_x11=true"
             args="$args skia_use_freetype=true"
             args="$args skia_use_fontconfig=true"
             args="$args skia_use_harfbuzz=true"
             args="$args skia_use_dng_sdk=true"
             args="$args skia_use_piex=true"
-            # 设置C++20支持
-            args="$args extra_cflags_cc=[\"-std=c++20\"]"
-            # Dawn Linux特定设置 - 只启用Linux后端
-            args="$args dawn_enable_vulkan=true"
-            args="$args dawn_enable_opengles=true"
-            args="$args dawn_enable_desktop_gl=true"
-            args="$args dawn_use_x11=true"
-            args="$args dawn_enable_metal=false"
-            args="$args dawn_enable_d3d12=false"
-            args="$args dawn_enable_d3d11=false"
-            args="$args dawn_enable_null=false"
-            args="$args cc=\"gcc-12\""
-            args="$args cxx=\"g++-12\""
             args="$args skia_use_system_freetype2=true"
             args="$args skia_use_system_harfbuzz=true"
             ;;
           "android")
-            # Android平台特定配置 - 启用Dawn Vulkan和OpenGL ES后端，C++20支持
+            # Android平台特定配置
             args="$args ndk=\"$ANDROID_NDK_ROOT\""
             args="$args android_api_level=${{ matrix.android_api }}"
             args="$args skia_use_system_freetype2=false"
@@ -290,16 +235,6 @@ jobs:
             args="$args skia_use_system_harfbuzz=false"
             args="$args skia_use_dng_sdk=true"
             args="$args skia_use_piex=true"
-            # 设置C++20支持
-            args="$args extra_cflags_cc=[\"-std=c++20\"]"
-            # Dawn Android特定设置 - 只启用Android后端
-            args="$args dawn_enable_vulkan=true"
-            args="$args dawn_enable_opengles=true"
-            args="$args dawn_enable_desktop_gl=false"
-            args="$args dawn_enable_metal=false"
-            args="$args dawn_enable_d3d12=false"
-            args="$args dawn_enable_d3d11=false"
-            args="$args dawn_enable_null=false"
             ;;
         esac
         
@@ -307,49 +242,32 @@ jobs:
       shell: bash
       
     # 使用GN生成构建文件
-    - name: 生成Dawn WebGPU和Graphite构建文件
+    - name: 生成Skia构建文件
       run: |
         cd skia
         echo "正在为 ${{ matrix.target_os }} 平台生成构建文件..."
         bin/gn gen out/Release --args="$BUILD_ARGS"
-        echo "构建配置完成，验证Dawn后端配置..."
-        case "${{ matrix.target_os }}" in
-          "win")
-            echo "Windows平台已启用: Direct3D 12/11 + Vulkan"
-            ;;
-          "mac")
-            echo "macOS平台已启用: Metal"
-            ;;
-          "linux")
-            echo "Linux平台已启用: Vulkan + OpenGL"
-            ;;
-          "android")
-            echo "Android平台已启用: Vulkan + OpenGL ES"
-            ;;
-        esac
+        echo "构建配置完成"
       shell: bash
       
-    # 使用Ninja编译Skia，根据平台调整线程数
-    - name: 编译Skia Dawn WebGPU和Graphite版本
+    # 使用Ninja编译Skia
+    - name: 编译Skia
       run: |
         cd skia
-        echo "开始编译 ${{ matrix.target_os }} 平台的Skia Dawn WebGPU版本..."
+        echo "开始编译 ${{ matrix.target_os }} 平台的Skia..."
         # 根据平台设置并行编译线程数
         if [ "${{ matrix.target_os }}" = "android" ]; then
           # Android构建使用8线程
           ninja -C out/Release -j8
-        elif [ "${{ matrix.target_os }}" = "mac" ]; then
-          # macOS构建使用4线程以避免编译器过载
-          ninja -C out/Release -j4
         else
           # 其他平台使用6线程
           ninja -C out/Release -j6
         fi
-        echo "✅ ${{ matrix.target_os }} 平台Skia Dawn WebGPU版本编译完成"
+        echo "✅ ${{ matrix.target_os }} 平台Skia编译完成"
       shell: bash
       
     # 创建发布包并整理文件
-    - name: 创建Dawn WebGPU和Graphite发布包
+    - name: 创建Skia发布包
       run: |
         cd skia
         
@@ -360,8 +278,6 @@ jobs:
         mkdir -p package/docs
         mkdir -p package/examples
         mkdir -p package/modules
-        mkdir -p package/dawn
-        mkdir -p package/graphite
         
         # 如果是Android平台，创建Android特定目录
         if [ "${{ matrix.target_os }}" = "android" ]; then
@@ -376,17 +292,6 @@ jobs:
           cp -r modules/* package/modules/ 2>/dev/null || true
         fi
         
-        # 复制Dawn相关头文件
-        if [ -d "third_party/externals/dawn/include" ]; then
-          cp -r third_party/externals/dawn/include/* package/dawn/ 2>/dev/null || true
-        fi
-        
-        # 复制Graphite相关头文件（如果存在独立的graphite头文件目录）
-        if [ -d "include/gpu/graphite" ]; then
-          mkdir -p package/graphite/gpu/graphite
-          cp -r include/gpu/graphite/* package/graphite/gpu/graphite/ 2>/dev/null || true
-        fi
-        
         # 复制Android特定的头文件
         if [ "${{ matrix.target_os }}" = "android" ] && [ -d "include/android" ]; then
           cp -r include/android/* package/android/ 2>/dev/null || true
@@ -398,16 +303,6 @@ jobs:
           # 复制skcms模块
           if [ -d "third_party/skcms" ]; then
             cp -r third_party/skcms package/third_party/ 2>/dev/null || true
-          fi
-          # 复制Dawn相关third_party文件
-          if [ -d "third_party/externals/dawn" ]; then
-            mkdir -p package/third_party/dawn
-            find third_party/externals/dawn -name "*.h" -o -name "*.hpp" | while read file; do
-              relative_path=${file#third_party/externals/dawn/}
-              target_dir="package/third_party/dawn/$(dirname "$relative_path")"
-              mkdir -p "$target_dir"
-              cp "$file" "$target_dir/" 2>/dev/null || true
-            done
           fi
           # 复制其他可能需要的third_party模块
           find third_party -name "*.h" -o -name "*.hpp" | while read file; do
@@ -446,19 +341,16 @@ jobs:
         
         # 创建构建信息文件
         cat > package/BUILD_INFO.txt << EOF
-        Skia Dawn WebGPU + Graphite 完整构建信息
-        ========================================
+        Skia 完整构建信息
+        ==================
         平台: ${{ matrix.target_os }}
         架构: ${{ matrix.target_cpu }}
         包名: ${{ matrix.platform }}
-        构建模式: Release (官方完整构建 + Dawn WebGPU + Graphite)
-        C++标准: C++20 (支持Dawn WebGPU的Concepts特性)
-        编译优化: 使用并行编译加速Dawn和Graphite构建
+        构建模式: Release (官方完整构建)
+        编译优化: 使用并行编译加速构建过程
         
         支持的功能:
-        - GPU渲染 (OpenGL + Vulkan + Dawn WebGPU)
-        - Graphite 现代渲染架构
-        - Dawn WebGPU 现代跨平台GPU API
+        - GPU渲染 (OpenGL + Vulkan)
         - PDF导出 (内置HarfBuzz)
         - SVG支持
         - Skottie动画
@@ -466,6 +358,12 @@ jobs:
         - 字体管理 (内置FreeType)
         - 图像编解码
         - 颜色管理 (skcms模块)
+        
+        图形后端:
+        - OpenGL/OpenGL ES
+        - Vulkan
+        - Metal (仅macOS)
+        - Direct3D (仅Windows)
         EOF
         
         # 根据平台添加特定信息
@@ -475,8 +373,7 @@ jobs:
         
         Windows特定信息:
         - 运行时: 使用/MD运行时 (多线程DLL)
-        - Dawn后端: Direct3D 12 + Direct3D 11 + Vulkan
-        - 编译器要求: MSVC 2019 16.11+ 或 MSVC 2022
+        - GPU后端: Direct3D + OpenGL + Vulkan
         - 特殊说明: 已禁用DNG SDK以保证C++17兼容性
         EOF
             ;;
@@ -484,19 +381,16 @@ jobs:
             cat >> package/BUILD_INFO.txt << EOF
         
         macOS特定信息:
-        - Dawn后端: Metal (原生macOS)
-        - 编译器要求: Xcode 15+ (Clang 15+)，使用libc++标准库
+        - GPU后端: Metal + OpenGL + Vulkan
         - DNG RAW图像: 完整支持
-        - 特殊说明: 使用内置库避免系统依赖冲突，强制使用现代C++20特性
-        - 兼容性: 针对macOS C++20支持进行了优化
+        - 特殊说明: 使用内置库避免系统依赖冲突
         EOF
             ;;
           "linux")
             cat >> package/BUILD_INFO.txt << EOF
         
         Linux特定信息:
-        - Dawn后端: Vulkan + OpenGL + OpenGL ES
-        - 编译器要求: GCC 12+ 或 Clang 15+
+        - GPU后端: OpenGL + Vulkan
         - DNG RAW图像: 完整支持
         - X11支持: 完整
         EOF
@@ -507,7 +401,7 @@ jobs:
         Android特定信息:
         - Android API级别: ${{ matrix.android_api }}+
         - NDK版本: r25c
-        - Dawn后端: Vulkan + OpenGL ES
+        - GPU后端: OpenGL ES + Vulkan
         - Android字体管理器: 完整支持
         - JNI接口: 支持
         - DNG RAW图像: 完整支持
@@ -518,42 +412,36 @@ jobs:
         cat >> package/BUILD_INFO.txt << EOF
         
         特殊说明:
-        - 使用C++20标准以支持Dawn WebGPU的Concepts特性
-        - 根据平台启用对应的Dawn后端，避免跨平台编译错误
         - 使用内置FreeType和HarfBuzz库以避免系统依赖冲突
         - 所有依赖都已静态链接
-        - Dawn WebGPU通过Graphite渲染器提供现代跨平台GPU抽象
-        - Graphite渲染器为新一代GPU架构设计
         - 为保证构建稳定性已禁用调试工具构建
         - 头文件路径已配置支持源码include格式和模块引用
-        - 包含完整的modules、third_party、Dawn和Graphite依赖
+        - 包含完整的modules和third_party依赖
         - 使用并行编译加速构建过程
-        - Dawn WebGPU为跨平台GPU应用提供统一接口
-        - Graphite渲染器提供更现代的GPU资源管理
-        - macOS平台已优化C++20兼容性问题
+        - 生产环境就绪
         EOF
         
       shell: bash
       
-    # 生成通用的CMakeLists.txt文件（支持所有平台和C++20）
-    - name: 生成Dawn WebGPU和Graphite CMakeLists.txt
+    # 生成通用的CMakeLists.txt文件
+    - name: 生成Skia CMakeLists.txt
       run: |
         cd skia/package
         
-        # 生成CMakeLists.txt文件，支持所有平台和C++20
+        # 生成CMakeLists.txt文件，支持所有平台
         cat > CMakeLists.txt << 'EOF'
-        # Skia Dawn WebGPU + Graphite 图形库的CMake配置文件（全平台支持，C++20）
+        # Skia图形库的CMake配置文件（全平台支持）
         cmake_minimum_required(VERSION 3.15)
         
         # 设置项目信息
-        project(SkiaDawnGraphitePrebuilt
+        project(SkiaPrebuilt
             VERSION 1.0.0
-            DESCRIPTION "完整预编译的Skia图形库 with Dawn WebGPU + Graphite后端 (全平台C++20支持)"
+            DESCRIPTION "完整预编译的Skia图形库"
             LANGUAGES CXX C
         )
         
-        # 设置C++标准（Dawn需要C++20支持Concepts特性）
-        set(CMAKE_CXX_STANDARD 20)
+        # 设置C++标准
+        set(CMAKE_CXX_STANDARD 17)
         set(CMAKE_CXX_STANDARD_REQUIRED ON)
         
         # 获取当前目录
@@ -563,19 +451,15 @@ jobs:
         add_library(skia INTERFACE)
         add_library(skia::skia ALIAS skia)
         
-        # 设置包含目录 - 包含Dawn WebGPU、Graphite和平台特定头文件路径
+        # 设置包含目录
         target_include_directories(skia INTERFACE
             $<BUILD_INTERFACE:${SKIA_ROOT_DIR}>
             $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/modules>
             $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/third_party>
-            $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/dawn>
-            $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/graphite>
             $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/android>
             $<INSTALL_INTERFACE:.>
             $<INSTALL_INTERFACE:modules>
             $<INSTALL_INTERFACE:third_party>
-            $<INSTALL_INTERFACE:dawn>
-            $<INSTALL_INTERFACE:graphite>
             $<INSTALL_INTERFACE:android>
         )
         
@@ -584,13 +468,11 @@ jobs:
         
         # 根据平台设置特定的链接库和编译选项
         if(WIN32)
-            # Windows平台配置 - 使用/MD运行时，启用Dawn WebGPU和Graphite，C++20支持
+            # Windows平台配置 - 使用/MD运行时
             target_compile_definitions(skia INTERFACE
                 SK_GANESH=1
-                SK_GRAPHITE=1
                 SK_VULKAN=1
                 SK_GL=1
-                SK_DAWN=1
                 SK_BUILD_FOR_WIN=1
                 SK_ENABLE_SKOTTIE=1
                 SK_ENABLE_SVG=1
@@ -598,23 +480,21 @@ jobs:
                 _UNICODE
             )
             
-            # 设置Windows运行时为/MD（多线程DLL）和C++20支持
+            # 设置Windows运行时为/MD（多线程DLL）
             target_compile_options(skia INTERFACE
                 $<$<CONFIG:Debug>:/MDd>
                 $<$<CONFIG:Release>:/MD>
                 $<$<CONFIG:RelWithDebInfo>:/MD>
                 $<$<CONFIG:MinSizeRel>:/MD>
-                /std:c++20
             )
             
-            # 添加Windows系统库 - 包含Dawn WebGPU所需的库
+            # 添加Windows系统库
             target_link_libraries(skia INTERFACE
                 ${SKIA_LIBRARIES}
                 # OpenGL相关
                 OpenGL32
-                # DirectX相关（Dawn WebGPU Windows后端需要）
+                # DirectX相关
                 d3d11
-                d3d12
                 dxgi
                 d3dcompiler
                 dxguid
@@ -634,30 +514,15 @@ jobs:
             )
             
         elseif(APPLE)
-            # macOS平台配置 - 启用Dawn WebGPU Metal后端和Graphite，C++20支持
+            # macOS平台配置
             target_compile_definitions(skia INTERFACE
                 SK_GANESH=1
-                SK_GRAPHITE=1
                 SK_METAL=1
                 SK_GL=1
                 SK_VULKAN=1
-                SK_DAWN=1
                 SK_BUILD_FOR_MAC=1
                 SK_ENABLE_SKOTTIE=1
                 SK_ENABLE_SVG=1
-            )
-            
-            # 设置C++20支持，针对macOS的特殊配置
-            target_compile_options(skia INTERFACE
-                -std=c++20
-                -stdlib=libc++
-                -Wno-unknown-warning-option
-                -Wno-c++20-compat
-            )
-            
-            # 设置链接选项使用libc++
-            target_link_options(skia INTERFACE
-                -stdlib=libc++
             )
             
             # 查找macOS系统框架
@@ -687,23 +552,19 @@ jobs:
             )
             
         elseif(ANDROID)
-            # Android平台配置 - 启用Dawn WebGPU Vulkan和OpenGL ES后端以及Graphite，C++20支持
+            # Android平台配置
             target_compile_definitions(skia INTERFACE
                 ANDROID
                 SK_GANESH=1
-                SK_GRAPHITE=1
                 SK_VULKAN=1
                 SK_GL=1
-                SK_DAWN=1
                 SK_BUILD_FOR_ANDROID=1
                 SK_ENABLE_SKOTTIE=1
                 SK_ENABLE_SVG=1
                 __ANDROID_API__=21
             )
             
-            # 设置C++20支持
             target_compile_options(skia INTERFACE
-                -std=c++20
                 -fPIC
                 -fno-rtti
                 -fno-exceptions
@@ -735,21 +596,14 @@ jobs:
             )
             
         else()
-            # Linux平台配置 - 启用Dawn WebGPU Vulkan后端和Graphite，C++20支持
+            # Linux平台配置
             target_compile_definitions(skia INTERFACE
                 SK_GANESH=1
-                SK_GRAPHITE=1
                 SK_VULKAN=1
                 SK_GL=1
-                SK_DAWN=1
                 SK_BUILD_FOR_UNIX=1
                 SK_ENABLE_SKOTTIE=1
                 SK_ENABLE_SVG=1
-            )
-            
-            # 设置C++20支持
-            target_compile_options(skia INTERFACE
-                -std=c++20
             )
             
             # 查找必要的系统库
@@ -759,7 +613,7 @@ jobs:
                 pkg_check_modules(HARFBUZZ QUIET harfbuzz)
             endif()
             
-            # 查找Vulkan（Dawn WebGPU需要）
+            # 查找Vulkan
             find_package(Vulkan QUIET)
             
             # 查找X11相关库
@@ -787,7 +641,7 @@ jobs:
                 target_include_directories(skia INTERFACE ${HARFBUZZ_INCLUDE_DIRS})
             endif()
             
-            # 添加Vulkan支持（Dawn WebGPU需要）
+            # 添加Vulkan支持
             if(Vulkan_FOUND)
                 target_link_libraries(skia INTERFACE ${Vulkan_LIBRARIES})
                 target_include_directories(skia INTERFACE ${Vulkan_INCLUDE_DIRS})
@@ -806,8 +660,8 @@ jobs:
             endif()
         endif()
         
-        # 设置编译选项 - 确保C++20支持
-        target_compile_features(skia INTERFACE cxx_std_20)
+        # 设置编译选项
+        target_compile_features(skia INTERFACE cxx_std_17)
         
         # 优化设置
         target_compile_options(skia INTERFACE
@@ -826,7 +680,7 @@ jobs:
       shell: bash
       
     # 打包构建产物为ZIP文件
-    - name: 打包Dawn WebGPU和Graphite构建产物
+    - name: 打包Skia构建产物
       run: |
         cd skia/package
         
@@ -843,7 +697,7 @@ jobs:
       shell: bash
       
     # 上传构建产物到GitHub Actions
-    - name: 上传Dawn WebGPU和Graphite构建产物
+    - name: 上传Skia构建产物
       uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.platform }}
@@ -852,8 +706,8 @@ jobs:
         compression-level: 0
         
   # 创建GitHub Release发布（仅在推送到主分支或定时任务时）
-  create-dawn-release:
-    needs: build-skia-dawn-all
+  create-release:
+    needs: build-skia
     runs-on: ubuntu-latest
     if: |
       (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) ||
@@ -869,7 +723,7 @@ jobs:
       uses: actions/checkout@v4
       
     # 下载所有构建产物
-    - name: 下载所有Dawn WebGPU构建产物
+    - name: 下载所有Skia构建产物
       uses: actions/download-artifact@v4
       with:
         path: artifacts
@@ -879,11 +733,11 @@ jobs:
       id: get_tag
       run: |
         if [ "${{ github.event_name }}" = "schedule" ]; then
-          echo "tag=skia-dawn-all-daily-$(date +%Y%m%d)" >> $GITHUB_OUTPUT
-          echo "name=Skia Dawn WebGPU 全平台每日构建包 $(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
+          echo "tag=skia-daily-$(date +%Y%m%d)" >> $GITHUB_OUTPUT
+          echo "name=Skia全平台每日构建包 $(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
         else
-          echo "tag=skia-dawn-all-build-${{ github.run_number }}" >> $GITHUB_OUTPUT
-          echo "name=Skia Dawn WebGPU 全平台构建包 v${{ github.run_number }}" >> $GITHUB_OUTPUT
+          echo "tag=skia-build-${{ github.run_number }}" >> $GITHUB_OUTPUT
+          echo "name=Skia全平台构建包 v${{ github.run_number }}" >> $GITHUB_OUTPUT
         fi
         
     # 创建GitHub Release发布版本
@@ -893,57 +747,39 @@ jobs:
         tag_name: ${{ steps.get_tag.outputs.tag }}
         name: ${{ steps.get_tag.outputs.name }}
         body: |
-          # Skia Dawn WebGPU + Graphite 全平台构建包（C++20兼容性修正版）
+          # Skia 全平台构建包
           
-          这个发布包包含了启用Dawn WebGPU后端和Graphite渲染器的Skia图形库预编译版本，支持所有主流平台，使用C++20标准，已修正macOS C++20兼容性问题。
+          这个发布包包含了Skia图形库在多个平台的完整预编译版本，支持所有核心功能。
           
-          ## 包含的平台和Dawn后端
+          ## 包含的平台
           
           ### 桌面平台
-          - **x64_windows_dawn.zip** - Windows x64架构
-            - Dawn后端: Direct3D 12/11 + Vulkan
-            - 编译器要求: MSVC 2019 16.11+ 或 MSVC 2022
+          - **x64_windows.zip** - Windows x64架构
+            - GPU后端: Direct3D + OpenGL + Vulkan
+            - 运行时: /MD (多线程DLL)
           
-          - **x64_macos_dawn.zip** - macOS Intel x64架构
-          - **arm64_macos_dawn.zip** - macOS Apple Silicon ARM64架构
-            - Dawn后端: Metal（原生macOS）
-            - 编译器要求: Xcode 15+ (Clang 15+)，使用libc++标准库
-            - ✅ **已修正C++20兼容性问题**
+          - **x64_macos.zip** - macOS Intel x64架构
+          - **arm64_macos.zip** - macOS Apple Silicon ARM64架构
+            - GPU后端: Metal + OpenGL + Vulkan
+            - 完整DNG RAW支持
           
-          - **x64_linux_dawn.zip** - Linux x64架构
-            - Dawn后端: Vulkan + OpenGL + OpenGL ES
-            - 编译器要求: GCC 12+ 或 Clang 15+
+          - **x64_linux.zip** - Linux x64架构
+            - GPU后端: OpenGL + Vulkan
+            - X11完整支持
           
           ### 移动平台
-          - **x64_android_dawn.zip** - Android x64架构
-          - **arm64_android_dawn.zip** - Android ARM64架构
-            - Dawn后端: Vulkan + OpenGL ES
+          - **x64_android.zip** - Android x64架构
+          - **arm64_android.zip** - Android ARM64架构
+            - GPU后端: OpenGL ES + Vulkan
             - Android API级别: 21+
             - NDK版本: r25c
-          
-          ## 重要修正
-          
-          - ✅ **修正macOS C++20兼容性**: 强制使用libc++标准库，解决Concepts支持问题
-          - ✅ **优化编译器配置**: 每个平台使用最适合的编译器版本
-          - ✅ **修正平台后端配置**: 每个平台只启用对应的Dawn后端
-          - ✅ **减少编译线程**: macOS使用4线程避免编译器过载
-          - ✅ **警告抑制**: 添加C++20兼容性警告抑制
           
           ## CMake使用方法
           
           ```cmake
-          # 确保CMake版本支持C++20
-          cmake_minimum_required(VERSION 3.15)
-          
-          # 设置C++20标准
-          set(CMAKE_CXX_STANDARD 20)
+          # 设置C++17标准
+          set(CMAKE_CXX_STANDARD 17)
           set(CMAKE_CXX_STANDARD_REQUIRED ON)
-          
-          # macOS特殊配置（如果需要）
-          if(APPLE)
-              set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
-              set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++")
-          endif()
           
           add_subdirectory(path/to/skia)
           target_link_libraries(your_target skia::skia)
@@ -951,17 +787,16 @@ jobs:
           
           ## 主要特性
           
-          - Dawn WebGPU跨平台GPU API支持（基于C++20 Concepts）
-          - Graphite现代渲染架构
           - 完整的Skia核心功能
+          - GPU加速渲染（OpenGL/Vulkan/Metal/Direct3D）
           - PDF/SVG/动画支持
           - 内置字体和文本处理
-          - 支持计算着色器和现代GPU功能
-          - Windows使用/MD运行时
+          - 图像编解码支持
+          - 颜色管理 (skcms模块)
           - Android平台完整支持
-          - macOS C++20兼容性优化
-          - 平台特定的Dawn后端优化
-          - 使用并行编译加速构建过程
+          - 生产环境就绪
+          - 使用并行编译加速构建
+          - 完整的模块和依赖包含
         files: |
           artifacts/*/**.zip
         draft: false
@@ -974,26 +809,19 @@ jobs:
     # 构建完成通知
     - name: 构建完成通知
       run: |
-        echo "🎉 Skia Dawn WebGPU 全平台构建完成（C++20兼容性修正版）！"
+        echo "🎉 Skia全平台构建完成！"
         echo "📦 已生成以下平台的构建包："
-        echo "   • Windows: x64（Direct3D + Vulkan + C++20）"  
-        echo "   • macOS: x64, ARM64（Metal + C++20 + libc++修正）"
-        echo "   • Linux: x64（Vulkan + OpenGL + C++20 + GCC12）"
-        echo "   • Android: x64, ARM64（Vulkan + OpenGL ES + C++20）"
+        echo "   • Windows: x64（使用/MD运行时）"
+        echo "   • macOS: x64, ARM64"
+        echo "   • Linux: x64"
+        echo "   • Android: x64, ARM64"
         echo "🔗 可在Actions页面下载，或在Releases中获取"
-        echo "📋 每个包都包含全平台CMakeLists.txt配置"
-        echo "✅ 已修正macOS C++20兼容性问题，强制使用libc++"
-        echo "✅ 已修正平台后端配置问题，避免跨平台编译错误"
-        echo "✅ 优化了编译器版本和线程配置"
-        echo "🎮 支持Dawn WebGPU + Graphite现代渲染架构"
+        echo "📋 每个包都包含完整的CMakeLists.txt配置"
+        echo "🎮 支持GPU加速渲染（OpenGL/Vulkan/Metal/Direct3D）"
         echo "✨ 包含PDF、SVG、Skottie等核心功能"
         echo "🔤 使用内置字体和文本引擎，无系统依赖"
         echo "📄 PDF导出支持字体子集功能"
         echo "🚀 生产环境就绪，稳定性优先"
         echo "📁 完美支持源码include格式和模块依赖"
         echo "🎨 包含skcms颜色管理模块"
-        echo "⚙️  使用C++20标准支持Dawn WebGPU的Concepts特性"
         echo "⚡ 使用并行编译加速构建过程"
-        echo "🌐 Dawn WebGPU提供跨平台统一GPU接口"
-        echo "🔧 Graphite渲染器支持现代GPU架构"
-        echo "🍎 macOS平台已优化C++20兼容性，使用现代标准库"
