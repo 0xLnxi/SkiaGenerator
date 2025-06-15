@@ -1,4 +1,4 @@
-# Skia 全平台构建工作流（包含Dawn WebGPU支持）
+# Skia 全平台构建工作流（包含Dawn WebGPU支持，优化磁盘空间）
 name: 编译 Skia 全平台构建包
 
 on:
@@ -73,6 +73,33 @@ jobs:
     - name: 检出代码仓库
       uses: actions/checkout@v4
       
+    # 清理磁盘空间（仅限Linux和Android构建）
+    - name: 清理磁盘空间
+      if: runner.os == 'Linux'
+      run: |
+        echo "=== 清理前磁盘使用情况 ==="
+        df -h
+        
+        # 删除不必要的软件包和文件
+        sudo apt-get autoremove -y
+        sudo apt-get autoclean
+        
+        # 删除大型不必要的软件
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /usr/local/lib/android
+        sudo rm -rf /opt/ghc
+        sudo rm -rf /opt/hostedtoolcache/CodeQL
+        sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+        
+        # 清理Docker相关文件
+        docker system prune -a -f || true
+        
+        # 清理snap包
+        sudo snap list | awk 'NR>1{print $1}' | xargs -r sudo snap remove || true
+        
+        echo "=== 清理后磁盘使用情况 ==="
+        df -h
+        
     # 设置Python运行环境
     - name: 设置Python环境
       uses: actions/setup-python@v4
@@ -93,7 +120,7 @@ jobs:
         lsb_release -a
         
         # 只安装核心编译器（避免包冲突）
-        sudo apt-get install -y gcc g++ clang-18 clang++-18 libc++-18-dev libc++abi-18-dev
+        sudo apt-get install -y gcc g++ clang clang++
         
         # 安装C++标准库开发包
         sudo apt-get install -y libc++-dev libc++abi-dev || echo "libc++ 安装失败，继续使用 libstdc++"
@@ -155,7 +182,7 @@ jobs:
     # 获取Google的depot_tools工具集
     - name: 获取depot_tools
       run: |
-        git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+        git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git
         echo "${{ github.workspace }}/depot_tools" >> $GITHUB_PATH
       shell: bash
       
@@ -170,19 +197,39 @@ jobs:
     # 获取Skia源代码并同步依赖
     - name: 获取Skia源代码
       run: |
-        git clone https://skia.googlesource.com/skia.git
+        # 使用浅克隆减少下载大小
+        git clone --depth 1 https://skia.googlesource.com/skia.git
         cd skia
         python tools/git-sync-deps
       shell: bash
       
-    # 获取Dawn WebGPU源代码
+    # 检查磁盘空间
+    - name: 检查磁盘空间
+      run: |
+        echo "=== Skia下载后磁盘使用情况 ==="
+        df -h
+      shell: bash
+      
+    # 获取Dawn WebGPU源代码（使用更轻量级的方式）
     - name: 获取Dawn WebGPU源代码
       run: |
-        git clone https://dawn.googlesource.com/dawn.git
+        # 使用浅克隆减少下载大小
+        git clone --depth 1 https://dawn.googlesource.com/dawn.git
         cd dawn
-        # 同步Dawn的依赖
+        # 只同步必要的依赖，跳过一些大型可选组件
         cp scripts/standalone.gclient .gclient
-        gclient sync
+        # 使用环境变量减少下载内容
+        export GCLIENT_SKIP_DOWNLOAD_LARGE_FILES=1
+        gclient sync --no-history --shallow || gclient sync
+      shell: bash
+      
+    # 再次检查磁盘空间
+    - name: 检查磁盘空间
+      run: |
+        echo "=== Dawn下载后磁盘使用情况 ==="
+        df -h
+        echo "=== 检查最大的目录 ==="
+        du -sh * | sort -hr | head -10
       shell: bash
       
     # 配置Skia构建参数（包含Dawn支持）
@@ -217,8 +264,9 @@ jobs:
         # 设置Dawn路径
         args="$args dawn_dir=\"${{ github.workspace }}/dawn\""
         
-        # 禁用工具构建以避免测试工具API问题
+        # 禁用工具构建以避免测试工具API问题和节省空间
         args="$args skia_enable_tools=false"
+        args="$args skia_build_tests=false"
         
         # 设置目标平台和架构
         args="$args target_os=\"${{ matrix.target_os }}\""
@@ -315,18 +363,36 @@ jobs:
       run: |
         cd skia
         echo "开始编译 ${{ matrix.target_os }} 平台的Skia..."
-        # 根据平台设置并行编译线程数
+        
+        # 检查编译前磁盘空间
+        echo "=== 编译前磁盘使用情况 ==="
+        df -h
+        
+        # 根据平台设置并行编译线程数（减少内存使用）
         if [ "${{ matrix.target_os }}" = "android" ]; then
-          # Android构建使用8线程
-          ninja -C out/Release -j8
+          # Android构建使用4线程
+          ninja -C out/Release -j4
         else
-          # 其他平台使用6线程
-          ninja -C out/Release -j6
+          # 其他平台使用4线程
+          ninja -C out/Release -j4
         fi
         echo "✅ ${{ matrix.target_os }} 平台Skia编译完成"
       shell: bash
       
-    # 编译Dawn WebGPU
+    # 清理中间文件以节省空间
+    - name: 清理Skia中间文件
+      run: |
+        cd skia
+        # 删除编译过程中的临时文件
+        find out/Release -name "*.o" -delete 2>/dev/null || true
+        find out/Release -name "*.obj" -delete 2>/dev/null || true
+        find out/Release -name "*.pdb" -delete 2>/dev/null || true
+        
+        echo "=== Skia编译后磁盘使用情况 ==="
+        df -h
+      shell: bash
+      
+    # 编译Dawn WebGPU（使用轻量级配置）
     - name: 编译Dawn WebGPU
       run: |
         cd dawn
@@ -334,13 +400,16 @@ jobs:
         # 创建构建目录
         mkdir -p out/Release
         
-        # 配置Dawn构建参数
+        # 配置Dawn构建参数（减少功能以节省空间）
         dawn_args="is_debug=false"
         dawn_args="$dawn_args dawn_enable_vulkan=true"
         dawn_args="$dawn_args dawn_enable_d3d12=true"
         dawn_args="$dawn_args dawn_enable_metal=true"
         dawn_args="$dawn_args dawn_enable_desktop_gl=true"
         dawn_args="$dawn_args dawn_enable_opengles=true"
+        # 禁用一些可选功能以节省空间
+        dawn_args="$dawn_args dawn_build_tests=false"
+        dawn_args="$dawn_args dawn_build_samples=false"
         
         # 设置目标平台
         dawn_args="$dawn_args target_os=\"${{ matrix.target_os }}\""
@@ -385,10 +454,23 @@ jobs:
         echo "正在为 ${{ matrix.target_os }} 平台生成Dawn构建文件..."
         gn gen out/Release --args="$dawn_args"
         
-        # 编译Dawn
+        # 编译Dawn（使用较少线程）
         echo "开始编译 ${{ matrix.target_os }} 平台的Dawn..."
-        ninja -C out/Release -j6
+        ninja -C out/Release -j2
         echo "✅ ${{ matrix.target_os }} 平台Dawn编译完成"
+      shell: bash
+      
+    # 清理Dawn中间文件
+    - name: 清理Dawn中间文件
+      run: |
+        cd dawn
+        # 删除编译过程中的临时文件
+        find out/Release -name "*.o" -delete 2>/dev/null || true
+        find out/Release -name "*.obj" -delete 2>/dev/null || true
+        find out/Release -name "*.pdb" -delete 2>/dev/null || true
+        
+        echo "=== Dawn编译后磁盘使用情况 ==="
+        df -h
       shell: bash
       
     # 创建发布包并整理文件
@@ -462,9 +544,10 @@ jobs:
           cp -r ../dawn/include/* Skia/dawn/include/
         fi
         
-        # 复制示例文件
+        # 复制示例文件（只复制小文件）
         if [ -d "resources" ]; then
-          cp -r resources/* Skia/examples/ 2>/dev/null || true
+          mkdir -p Skia/examples
+          find resources -type f -size -1M -exec cp {} Skia/examples/ \; 2>/dev/null || true
         fi
         
         # 创建构建信息文件
@@ -501,8 +584,15 @@ jobs:
         - macOS: 最新 Clang with libc++
         - Linux: GCC/Clang with libstdc++/libc++（自动检测）
         - Android: NDK r25c Clang
+        
+        优化说明:
+        - 磁盘空间优化构建
+        - 禁用测试和示例以节省空间
+        - 使用浅克隆减少下载大小
         EOF
         
+        echo "=== 最终磁盘使用情况 ==="
+        df -h
       shell: bash
       
     # 生成统一的CMakeLists.txt文件（skdn接口）
@@ -854,6 +944,9 @@ jobs:
         fi
         
         echo "✅ Skia_Prebuilt_${{ matrix.platform }}.zip 构建包创建完成"
+        
+        # 显示最终文件大小
+        ls -lh "Skia_Prebuilt_${{ matrix.platform }}.zip"
       shell: bash
       
     # 上传构建产物到GitHub Actions
@@ -907,7 +1000,7 @@ jobs:
         tag_name: ${{ steps.get_tag.outputs.tag }}
         name: ${{ steps.get_tag.outputs.name }}
         body: |
-          # Skia + Dawn WebGPU 全平台构建包
+          # Skia + Dawn WebGPU 全平台构建包（磁盘空间优化版）
           
           这个发布包包含了Skia图形库和Dawn WebGPU后端在多个平台的完整预编译版本，支持所有核心功能。
           
@@ -967,12 +1060,15 @@ jobs:
           - ✅ **全平台支持**
           - ✅ **生产环境就绪**
           
-          ## 修复内容
+          ## 磁盘空间优化
           
-          - ✅ **修复Ubuntu包冲突**: 简化依赖安装，避免包冲突
-          - ✅ **智能编译器选择**: 自动检测并选择最佳编译器和标准库
-          - ✅ **增强容错机制**: 添加错误处理，提高构建成功率
-          - ✅ **优化CMake配置**: 自适应标准库配置，支持多种环境
+          - ✅ **清理GitHub Actions运行器磁盘空间**
+          - ✅ **使用浅克隆减少下载大小**
+          - ✅ **禁用测试和示例构建**
+          - ✅ **清理编译中间文件**
+          - ✅ **减少并行编译线程数**
+          - ✅ **轻量级Dawn配置**
+          - ✅ **智能文件复制策略**
         files: |
           artifacts/*/**.zip
         draft: false
