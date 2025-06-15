@@ -73,9 +73,9 @@ jobs:
     - name: 检出代码仓库
       uses: actions/checkout@v4
       
-    # 清理磁盘空间（仅限Linux和Android构建）
+    # 清理磁盘空间（仅限Linux但不包含Android构建）
     - name: 清理磁盘空间
-      if: runner.os == 'Linux'
+      if: runner.os == 'Linux' && matrix.target_os != 'android'
       run: |
         echo "=== 清理前磁盘使用情况 ==="
         df -h
@@ -84,9 +84,8 @@ jobs:
         sudo apt-get autoremove -y
         sudo apt-get autoclean
         
-        # 删除大型不必要的软件
+        # 删除大型不必要的软件（但保留Android相关）
         sudo rm -rf /usr/share/dotnet
-        sudo rm -rf /usr/local/lib/android
         sudo rm -rf /opt/ghc
         sudo rm -rf /opt/hostedtoolcache/CodeQL
         sudo rm -rf "$AGENT_TOOLSDIRECTORY"
@@ -141,7 +140,9 @@ jobs:
         sudo apt-get install -y pkg-config
         
         # 安装Java开发环境（Android构建需要）
-        sudo apt-get install -y openjdk-11-jdk
+        if [ "${{ matrix.target_os }}" = "android" ]; then
+          sudo apt-get install -y openjdk-11-jdk
+        fi
         
         # 显示编译器版本信息
         echo "=== 编译器版本信息 ==="
@@ -172,27 +173,88 @@ jobs:
         # 安装ninja构建工具
         choco install ninja -y
         
-    # 设置Android NDK环境（仅限Android平台）- 使用更稳定的NDK版本
+    # 设置Android NDK环境（仅限Android平台）- 使用GitHub Actions自带的Android环境
     - name: 设置Android NDK
       if: matrix.target_os == 'android'
-      uses: nttld/setup-ndk@v1
-      with:
-        ndk-version: r25b
+      run: |
+        echo "=== 设置Android NDK环境 ==="
+        
+        # 检查系统中是否已有Android SDK
+        if [ -d "$ANDROID_HOME" ]; then
+          echo "找到Android SDK目录: $ANDROID_HOME"
+          ls -la "$ANDROID_HOME" || true
+        fi
+        
+        # 检查是否已有NDK
+        if [ -d "$ANDROID_HOME/ndk" ]; then
+          echo "找到NDK目录:"
+          ls -la "$ANDROID_HOME/ndk/" || true
+          # 使用最新的NDK版本
+          LATEST_NDK=$(ls -1 "$ANDROID_HOME/ndk/" | sort -V | tail -1)
+          if [ -n "$LATEST_NDK" ]; then
+            export ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/$LATEST_NDK"
+            echo "设置NDK路径为: $ANDROID_NDK_ROOT"
+            echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
+          fi
+        fi
+        
+        # 如果没有找到NDK，手动安装
+        if [ -z "$ANDROID_NDK_ROOT" ] || [ ! -d "$ANDROID_NDK_ROOT" ]; then
+          echo "未找到NDK，尝试安装..."
+          
+          # 创建Android SDK目录
+          sudo mkdir -p /usr/local/lib/android/sdk
+          
+          # 下载并安装Android SDK命令行工具
+          cd /tmp
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+          unzip -q commandlinetools-linux-9477386_latest.zip
+          sudo mv cmdline-tools /usr/local/lib/android/sdk/
+          sudo mkdir -p /usr/local/lib/android/sdk/cmdline-tools/latest
+          sudo mv /usr/local/lib/android/sdk/cmdline-tools/* /usr/local/lib/android/sdk/cmdline-tools/latest/ 2>/dev/null || true
+          
+          # 设置环境变量
+          export ANDROID_HOME=/usr/local/lib/android/sdk
+          export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin
+          
+          # 接受许可证并安装NDK
+          echo "y" | sudo $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          sudo $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;25.2.9519653" || true
+          
+          # 设置NDK路径
+          export ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/25.2.9519653"
+          echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+        fi
+        
+        echo "最终NDK路径: $ANDROID_NDK_ROOT"
         
     # 验证Android NDK安装
     - name: 验证Android NDK安装
       if: matrix.target_os == 'android'
       run: |
-        echo "=== Android NDK 信息 ==="
+        echo "=== Android NDK 验证 ==="
         echo "NDK路径: $ANDROID_NDK_ROOT"
-        ls -la "$ANDROID_NDK_ROOT" || echo "NDK根目录不存在"
+        
+        if [ -z "$ANDROID_NDK_ROOT" ]; then
+          echo "错误: ANDROID_NDK_ROOT 环境变量未设置"
+          exit 1
+        fi
+        
+        if [ ! -d "$ANDROID_NDK_ROOT" ]; then
+          echo "错误: NDK目录不存在: $ANDROID_NDK_ROOT"
+          exit 1
+        fi
+        
+        echo "NDK目录内容:"
+        ls -la "$ANDROID_NDK_ROOT" || echo "无法列出NDK目录内容"
         
         # 检查关键文件是否存在
         if [ -d "$ANDROID_NDK_ROOT/sources/android/cpufeatures" ]; then
           echo "cpu-features目录存在"
           ls -la "$ANDROID_NDK_ROOT/sources/android/cpufeatures/"
         else
-          echo "cpu-features目录不存在，NDK可能不完整"
+          echo "警告: cpu-features目录不存在，但继续构建"
         fi
         
         # 检查NDK版本信息
@@ -200,6 +262,13 @@ jobs:
           echo "NDK版本信息:"
           cat "$ANDROID_NDK_ROOT/source.properties"
         fi
+        
+        # 检查工具链
+        if [ -d "$ANDROID_NDK_ROOT/toolchains" ]; then
+          echo "可用工具链:"
+          ls -la "$ANDROID_NDK_ROOT/toolchains/"
+        fi
+        
         echo "======================"
         
     # 获取Google的depot_tools工具集
@@ -334,8 +403,9 @@ jobs:
             echo "NDK路径: $ANDROID_NDK_ROOT"
             
             # 验证NDK路径有效性
-            if [ ! -d "$ANDROID_NDK_ROOT" ]; then
-              echo "错误: NDK路径无效"
+            if [ -z "$ANDROID_NDK_ROOT" ] || [ ! -d "$ANDROID_NDK_ROOT" ]; then
+              echo "错误: NDK路径无效或未设置"
+              echo "ANDROID_NDK_ROOT = '$ANDROID_NDK_ROOT'"
               exit 1
             fi
             
@@ -356,7 +426,7 @@ jobs:
             args="$args skia_use_libwebp_decode=true"
             args="$args skia_use_libwebp_encode=true"
             
-            # 设置C++20标准（Android NDK r25b支持C++20）
+            # 设置C++20标准
             args="$args extra_cflags_cc=[\"-std=c++20\"]"
             
             echo "Android构建参数配置完成"
@@ -506,13 +576,13 @@ jobs:
         - Windows: MSVC 2022 with /MD runtime
         - macOS: 最新 Clang with libc++
         - Linux: GCC/Clang with libstdc++/libc++（自动检测）
-        - Android: NDK r25b Clang
+        - Android: NDK Clang（自动安装最新版本）
         
         注意事项:
         - 此版本不包含Dawn WebGPU
         - Dawn需要通过外部CMake项目链接
         - 启用了Graphite现代渲染后端
-        - Android构建使用稳定的NDK r25b版本
+        - Android使用自动安装的NDK版本
         EOF
         
         echo "=== 最终磁盘使用情况 ==="
@@ -988,7 +1058,7 @@ jobs:
         tag_name: ${{ steps.get_tag.outputs.tag }}
         name: ${{ steps.get_tag.outputs.name }}
         body: |
-          # Skia + Graphite 全平台构建包（稳定版）
+          # Skia + Graphite 全平台构建包（Android修复版）
           
           这个发布包包含了Skia图形库和Graphite渲染引擎在多个平台的完整预编译版本，支持外部Dawn WebGPU链接。
           
@@ -1015,7 +1085,7 @@ jobs:
           - **Skia_Prebuilt_x64_android.zip** - Android x64架构
           - **Skia_Prebuilt_arm64_android.zip** - Android ARM64架构
             - GPU后端: OpenGL ES + Vulkan + Graphite
-            - 编译器: NDK r25b Clang（稳定版本）
+            - 编译器: 自动安装的NDK Clang
             - Android API级别: 21+
             - C++标准: C++20
           
@@ -1071,13 +1141,13 @@ jobs:
           - ✅ **全平台支持**
           - ✅ **生产环境就绪**
           
-          ## 最新修复
+          ## Android修复
           
-          - ✅ **修复Android NDK问题**: 使用稳定的NDK r25b版本
-          - ✅ **优化Android构建**: 禁用可能有问题的功能，确保构建成功
-          - ✅ **改进错误处理**: 增加NDK验证和错误诊断
-          - ✅ **减少编译线程**: Android使用2线程避免内存不足
-          - ✅ **增强兼容性**: 更好的跨平台兼容性
+          - ✅ **修复NDK路径问题**: 自动检测和安装Android NDK
+          - ✅ **智能磁盘清理**: Android构建时保留必要的Android SDK
+          - ✅ **多重NDK支持**: 支持系统自带和自动安装的NDK
+          - ✅ **增强验证**: 详细的NDK路径和文件验证
+          - ✅ **容错机制**: 自动回退和错误处理
           
           ## 架构说明
           
@@ -1085,7 +1155,7 @@ jobs:
           - Dawn WebGPU作为可选的外部依赖，可通过CMake链接
           - 提供了便捷的CMake函数来简化Dawn的集成
           - 支持动态启用/禁用Dawn功能
-          - 使用稳定的NDK版本确保Android构建成功
+          - Android构建使用智能NDK管理，确保构建成功
         files: |
           artifacts/*/**.zip
         draft: false
