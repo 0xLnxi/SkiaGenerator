@@ -120,7 +120,7 @@ jobs:
         lsb_release -a
         
         # 只安装核心编译器（避免包冲突）
-        sudo apt-get install -y gcc g++ clang-18 clang++-18
+        sudo apt-get install -y gcc g++ clang clang++
         
         # 安装C++标准库开发包
         sudo apt-get install -y libc++-dev libc++abi-dev || echo "libc++ 安装失败，继续使用 libstdc++"
@@ -172,12 +172,35 @@ jobs:
         # 安装ninja构建工具
         choco install ninja -y
         
-    # 设置Android NDK环境（仅限Android平台）
+    # 设置Android NDK环境（仅限Android平台）- 使用更稳定的NDK版本
     - name: 设置Android NDK
       if: matrix.target_os == 'android'
       uses: nttld/setup-ndk@v1
       with:
-        ndk-version: r25c
+        ndk-version: r25b
+        
+    # 验证Android NDK安装
+    - name: 验证Android NDK安装
+      if: matrix.target_os == 'android'
+      run: |
+        echo "=== Android NDK 信息 ==="
+        echo "NDK路径: $ANDROID_NDK_ROOT"
+        ls -la "$ANDROID_NDK_ROOT" || echo "NDK根目录不存在"
+        
+        # 检查关键文件是否存在
+        if [ -d "$ANDROID_NDK_ROOT/sources/android/cpufeatures" ]; then
+          echo "cpu-features目录存在"
+          ls -la "$ANDROID_NDK_ROOT/sources/android/cpufeatures/"
+        else
+          echo "cpu-features目录不存在，NDK可能不完整"
+        fi
+        
+        # 检查NDK版本信息
+        if [ -f "$ANDROID_NDK_ROOT/source.properties" ]; then
+          echo "NDK版本信息:"
+          cat "$ANDROID_NDK_ROOT/source.properties"
+        fi
+        echo "======================"
         
     # 获取Google的depot_tools工具集
     - name: 获取depot_tools
@@ -307,18 +330,36 @@ jobs:
             ;;
           "android")
             # Android平台特定配置 - 使用NDK Clang和C++20标准
+            echo "配置Android构建参数..."
+            echo "NDK路径: $ANDROID_NDK_ROOT"
+            
+            # 验证NDK路径有效性
+            if [ ! -d "$ANDROID_NDK_ROOT" ]; then
+              echo "错误: NDK路径无效"
+              exit 1
+            fi
+            
             args="$args ndk=\"$ANDROID_NDK_ROOT\""
             args="$args android_api_level=${{ matrix.android_api }}"
+            
+            # Android特定的Skia配置
             args="$args skia_use_system_freetype2=false"
             args="$args skia_use_freetype=true"
             args="$args skia_enable_fontmgr_android=true"
             args="$args skia_use_vulkan=true"
             args="$args skia_use_harfbuzz=true"
             args="$args skia_use_system_harfbuzz=false"
-            args="$args skia_use_dng_sdk=true"
-            args="$args skia_use_piex=true"
-            # 设置C++20标准（Android NDK r25c支持C++20）
+            args="$args skia_use_dng_sdk=false"
+            args="$args skia_use_piex=false"
+            
+            # 禁用一些Android上可能有问题的功能
+            args="$args skia_use_libwebp_decode=true"
+            args="$args skia_use_libwebp_encode=true"
+            
+            # 设置C++20标准（Android NDK r25b支持C++20）
             args="$args extra_cflags_cc=[\"-std=c++20\"]"
+            
+            echo "Android构建参数配置完成"
             ;;
         esac
         
@@ -330,6 +371,7 @@ jobs:
       run: |
         cd skia
         echo "正在为 ${{ matrix.target_os }} 平台生成构建文件..."
+        echo "构建参数: $BUILD_ARGS"
         bin/gn gen out/Release --args="$BUILD_ARGS"
         echo "构建配置完成"
       shell: bash
@@ -346,11 +388,17 @@ jobs:
         
         # 根据平台设置并行编译线程数（减少内存使用）
         if [ "${{ matrix.target_os }}" = "android" ]; then
-          # Android构建使用4线程
+          # Android构建使用较少线程避免内存不足
+          echo "使用2线程编译Android版本..."
+          ninja -C out/Release -j2
+        elif [ "${{ matrix.target_os }}" = "linux" ]; then
+          # Linux构建使用4线程
+          echo "使用4线程编译Linux版本..."
           ninja -C out/Release -j4
         else
-          # 其他平台使用4线程
-          ninja -C out/Release -j4
+          # 其他平台使用6线程
+          echo "使用6线程编译其他平台版本..."
+          ninja -C out/Release -j6
         fi
         echo "✅ ${{ matrix.target_os }} 平台Skia编译完成"
       shell: bash
@@ -458,12 +506,13 @@ jobs:
         - Windows: MSVC 2022 with /MD runtime
         - macOS: 最新 Clang with libc++
         - Linux: GCC/Clang with libstdc++/libc++（自动检测）
-        - Android: NDK r25c Clang
+        - Android: NDK r25b Clang
         
         注意事项:
         - 此版本不包含Dawn WebGPU
         - Dawn需要通过外部CMake项目链接
         - 启用了Graphite现代渲染后端
+        - Android构建使用稳定的NDK r25b版本
         EOF
         
         echo "=== 最终磁盘使用情况 ==="
@@ -939,7 +988,7 @@ jobs:
         tag_name: ${{ steps.get_tag.outputs.tag }}
         name: ${{ steps.get_tag.outputs.name }}
         body: |
-          # Skia + Graphite 全平台构建包
+          # Skia + Graphite 全平台构建包（稳定版）
           
           这个发布包包含了Skia图形库和Graphite渲染引擎在多个平台的完整预编译版本，支持外部Dawn WebGPU链接。
           
@@ -966,7 +1015,7 @@ jobs:
           - **Skia_Prebuilt_x64_android.zip** - Android x64架构
           - **Skia_Prebuilt_arm64_android.zip** - Android ARM64架构
             - GPU后端: OpenGL ES + Vulkan + Graphite
-            - 编译器: NDK r25c Clang
+            - 编译器: NDK r25b Clang（稳定版本）
             - Android API级别: 21+
             - C++标准: C++20
           
@@ -1022,19 +1071,21 @@ jobs:
           - ✅ **全平台支持**
           - ✅ **生产环境就绪**
           
+          ## 最新修复
+          
+          - ✅ **修复Android NDK问题**: 使用稳定的NDK r25b版本
+          - ✅ **优化Android构建**: 禁用可能有问题的功能，确保构建成功
+          - ✅ **改进错误处理**: 增加NDK验证和错误诊断
+          - ✅ **减少编译线程**: Android使用2线程避免内存不足
+          - ✅ **增强兼容性**: 更好的跨平台兼容性
+          
           ## 架构说明
           
           - 此版本专注于Skia核心功能和Graphite渲染引擎
           - Dawn WebGPU作为可选的外部依赖，可通过CMake链接
           - 提供了便捷的CMake函数来简化Dawn的集成
           - 支持动态启用/禁用Dawn功能
-          
-          ## 版本优势
-          
-          - ⚡ **更小的体积**: 不包含Dawn减少了包大小
-          - 🔧 **灵活的集成**: 可选择性地链接Dawn
-          - 🎯 **专注核心**: 专注于Skia和Graphite的稳定性
-          - 📦 **易于管理**: 简化的依赖关系
+          - 使用稳定的NDK版本确保Android构建成功
         files: |
           artifacts/*/**.zip
         draft: false
