@@ -1,14 +1,14 @@
-# Skia 全平台构建工作流 - 启用 Graphite 和 Dawn WebGPU 支持
-name: 构建 Skia 全平台预编译包
+# Skia 全平台统一构建工作流
+name: 编译 Skia 全平台统一构建包
 
 on:
   push:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
-  workflow_dispatch:  # 允许手动触发构建
+  workflow_dispatch:  # 允许手动触发
   schedule:
-    # 每天北京时间上午8点（UTC时间0点）自动执行构建
+    # 每天北京时间上午8点（UTC时间0点）执行一次
     - cron: '0 0 * * *'
 
 # 设置工作流权限
@@ -24,35 +24,35 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Windows x64 架构
+          # Windows x64架构
           - os: windows-latest
             platform: Win
             arch: x64
             target_os: win
             target_cpu: x64
             
-          # macOS x64 架构
+          # macOS x64架构
           - os: macos-latest
             platform: macOS
             arch: x64
             target_os: mac
             target_cpu: x64
             
-          # macOS ARM64 架构
+          # macOS ARM64架构
           - os: macos-latest
             platform: macOS
             arch: arm64
             target_os: mac
             target_cpu: arm64
             
-          # Linux x64 架构
+          # Linux x64架构
           - os: ubuntu-latest
             platform: Linux
             arch: x64
             target_os: linux
             target_cpu: x64
             
-          # Android x64 架构
+          # Android x64架构
           - os: ubuntu-latest
             platform: Android
             arch: x64
@@ -60,7 +60,7 @@ jobs:
             target_cpu: x64
             android_api: 21
             
-          # Android ARM64 架构
+          # Android ARM64架构
           - os: ubuntu-latest
             platform: Android
             arch: arm64
@@ -73,100 +73,85 @@ jobs:
     - name: 检出代码仓库
       uses: actions/checkout@v4
       
-    # 设置 Python 运行环境
-    - name: 设置 Python 环境
+    # 设置Python运行环境
+    - name: 设置Python环境
       uses: actions/setup-python@v4
       with:
         python-version: '3.x'
         
-    # 安装 Linux 系统依赖包（Linux 和 Android 构建需要）
-    - name: 安装 Linux 系统依赖
+    # 安装Linux系统依赖包（Linux和Android构建需要）
+    - name: 安装Linux系统依赖
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        # 安装现代编译器和构建工具
-        sudo apt-get install -y gcc-13 g++-13 clang-18 ninja-build git
-        # 设置默认编译器为 GCC 13
-        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100
-        sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 100
+        # 安装基础构建工具
+        sudo apt-get install -y build-essential ninja-build
         # 安装图形和字体相关依赖
         sudo apt-get install -y libfontconfig1-dev libfreetype6-dev libgl1-mesa-dev
-        # 安装 Vulkan 开发库
-        sudo apt-get install -y libvulkan-dev vulkan-tools vulkan-validationlayers-dev
-        # 安装 X11 相关库
+        # 安装Vulkan开发库
+        sudo apt-get install -y libvulkan-dev vulkan-tools
+        # 安装X11相关库
         sudo apt-get install -y libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
-        # 安装 ICU 和 HarfBuzz
+        # 安装ICU和HarfBuzz
         sudo apt-get install -y libicu-dev libharfbuzz-dev
-        # 安装 Java 开发环境（Android 构建需要）
+        # 安装Java开发环境（Android构建需要）
         sudo apt-get install -y openjdk-11-jdk
-        # 安装 Dawn WebGPU 依赖
-        sudo apt-get install -y libxss1 libxft2 libxext6 libwayland-dev
         
-    # 安装 macOS 系统依赖
-    - name: 安装 macOS 系统依赖
+    # 安装macOS系统依赖
+    - name: 安装macOS系统依赖
       if: runner.os == 'macOS'
       run: |
-        # 安装 Xcode 命令行工具
+        # 安装Xcode命令行工具
         xcode-select --install 2>/dev/null || true
-        # 安装 ninja 构建工具
+        # 安装ninja构建工具
         brew install ninja || true
-        # 验证 Xcode 版本
+        # 验证Xcode版本
         xcodebuild -version
-        # 确保使用最新的 clang
-        clang --version
         
-    # 安装 Windows 系统依赖
-    - name: 安装 Windows 系统依赖
+    # 安装Windows系统依赖
+    - name: 安装Windows系统依赖
       if: runner.os == 'Windows'
       run: |
-        # 安装 ninja 构建工具
+        # 安装ninja构建工具
         choco install ninja -y
-        # 安装 Git（确保最新版本）
-        choco install git -y
-        # 验证 MSVC 2022 版本
-        where cl
-        cl
         
-    # 设置 Android NDK 环境（仅限 Android 平台）
-    - name: 设置 Android NDK
+    # 设置Android NDK环境（仅限Android平台）
+    - name: 设置Android NDK
       if: matrix.target_os == 'android'
       uses: nttld/setup-ndk@v1
       with:
         ndk-version: r25c
         
-    # 获取 Google 的 depot_tools 工具集
-    - name: 获取 depot_tools
+    # 获取Google的depot_tools工具集
+    - name: 获取depot_tools
       run: |
-        git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git --depth 1
+        git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
         echo "${{ github.workspace }}/depot_tools" >> $GITHUB_PATH
       shell: bash
       
-    # 设置 Windows 系统的 depot_tools 环境变量
-    - name: 设置 depot_tools 环境变量
+    # 设置Windows系统的depot_tools环境变量
+    - name: 设置depot_tools环境变量
       if: runner.os == 'Windows'
       run: |
         echo "${{ github.workspace }}\depot_tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-        # 禁用 depot_tools 自动下载工具链，使用系统 MSVC 2022
+        # 禁用depot_tools自动下载工具链
         echo "DEPOT_TOOLS_WIN_TOOLCHAIN=0" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
         
-    # 获取 Skia 源代码并同步依赖
-    - name: 获取 Skia 源代码
+    # 获取Skia源代码并同步依赖
+    - name: 获取Skia源代码
       run: |
-        git clone https://skia.googlesource.com/skia.git --depth 1
+        git clone https://skia.googlesource.com/skia.git
         cd skia
-        # 同步所有依赖包括 Dawn WebGPU
         python tools/git-sync-deps
       shell: bash
       
-    # 配置 Skia 构建参数（启用 Graphite 和 Dawn）
-    - name: 配置 Skia 构建参数
+    # 配置Skia构建参数
+    - name: 配置Skia构建参数
       run: |
         cd skia
         
-        # 基础构建参数设置 - 启用全量功能和 C++20 支持
+        # 基础构建参数设置 - 启用全量功能包括Graphite
         args="is_official_build=true"
-        args="$args cc_wrapper=\"\""
-        args="$args is_clang=true"
         args="$args skia_use_system_expat=false"
         args="$args skia_use_system_icu=false"
         args="$args skia_use_system_libjpeg_turbo=false"
@@ -174,28 +159,22 @@ jobs:
         args="$args skia_use_system_libwebp=false"
         args="$args skia_use_system_zlib=false"
         
-        # 启用 C++20 标准
-        args="$args extra_cflags_cc=[\"-std=c++20\"]"
-        
-        # 启用 Graphite 支持（Skia 的下一代 GPU 后端）
-        args="$args skia_enable_graphite=true"
-        args="$args skia_use_dawn=true"
-        args="$args skia_use_webgpu_dawn=true"
-        
-        # 启用全量功能支持
+        # 启用全量功能支持，但使用内置依赖库
         args="$args skia_enable_pdf=true"
         args="$args skia_enable_skottie=true"
         args="$args skia_enable_skshaper=true"
         args="$args skia_enable_svg=true"
         args="$args skia_use_icu=true"
         
-        # 启用 GPU 后端支持（包含 Dawn WebGPU）
+        # 启用GPU后端支持 - 包含Graphite和Ganesh
         args="$args skia_enable_gpu=true"
         args="$args skia_use_gl=true"
         args="$args skia_use_vulkan=true"
         args="$args skia_enable_spirv_validation=false"
+        # 启用Graphite后端
+        args="$args skia_enable_graphite=true"
         
-        # 禁用工具构建以避免测试工具 API 问题
+        # 禁用工具构建以避免测试工具API问题
         args="$args skia_enable_tools=false"
         
         # 设置目标平台和架构
@@ -205,8 +184,7 @@ jobs:
         # 根据不同平台设置特定参数
         case "${{ matrix.target_os }}" in
           "win")
-            # Windows 平台特定配置 - 使用 MSVC 2022 和 /MD 运行时
-            args="$args is_clang=false"
+            # Windows平台特定配置 - 使用/MD运行时
             args="$args skia_use_angle=true"
             args="$args skia_use_direct3d=true"
             args="$args skia_use_freetype=true"
@@ -215,16 +193,13 @@ jobs:
             args="$args skia_use_system_harfbuzz=false"
             args="$args skia_use_dng_sdk=false"
             args="$args skia_use_piex=false"
-            # 启用 Dawn WebGPU 支持
-            args="$args skia_use_webgpu_dawn=true"
-            # 设置 Windows 使用 /MD 运行时（多线程 DLL）和 C++20
-            args="$args extra_cflags=[\"/MD\", \"/std:c++20\"]"
+            # 设置Windows使用/MD运行时（多线程DLL）
+            args="$args extra_cflags=[\"/MD\"]"
             args="$args extra_cflags_c=[\"/MD\"]"
-            args="$args extra_cflags_cc=[\"/MD\", \"/std:c++20\"]"
+            args="$args extra_cflags_cc=[\"/MD\"]"
             ;;
           "mac")
-            # macOS 平台特定配置 - 使用 Clang 18 和 C++20
-            args="$args is_clang=true"
+            # macOS平台特定配置 - 使用内置库避免系统库冲突
             args="$args skia_use_metal=true"
             args="$args skia_enable_skottie=true"
             args="$args skia_use_freetype=true"
@@ -235,19 +210,12 @@ jobs:
             args="$args skia_pdf_subset_harfbuzz=true"
             args="$args skia_use_dng_sdk=true"
             args="$args skia_use_piex=true"
-            # 启用 Dawn WebGPU 支持
-            args="$args skia_use_webgpu_dawn=true"
-            # 设置 C++20 标准
-            args="$args extra_cflags_cc=[\"-std=c++20\", \"-stdlib=libc++\"]"
             if [ "${{ matrix.target_cpu }}" = "arm64" ]; then
               args="$args target_cpu=\"arm64\""
             fi
             ;;
           "linux")
-            # Linux 平台特定配置 - 使用 GCC 13 和 C++20
-            args="$args is_clang=false"
-            args="$args cc=\"gcc-13\""
-            args="$args cxx=\"g++-13\""
+            # Linux平台特定配置
             args="$args skia_use_x11=true"
             args="$args skia_use_freetype=true"
             args="$args skia_use_fontconfig=true"
@@ -256,14 +224,9 @@ jobs:
             args="$args skia_use_piex=true"
             args="$args skia_use_system_freetype2=true"
             args="$args skia_use_system_harfbuzz=true"
-            # 启用 Dawn WebGPU 支持
-            args="$args skia_use_webgpu_dawn=true"
-            # 设置 C++20 标准
-            args="$args extra_cflags_cc=[\"-std=c++20\"]"
             ;;
           "android")
-            # Android 平台特定配置 - 使用 Clang 18 和 C++20
-            args="$args is_clang=true"
+            # Android平台特定配置
             args="$args ndk=\"$ANDROID_NDK_ROOT\""
             args="$args android_api_level=${{ matrix.android_api }}"
             args="$args skia_use_system_freetype2=false"
@@ -274,333 +237,268 @@ jobs:
             args="$args skia_use_system_harfbuzz=false"
             args="$args skia_use_dng_sdk=true"
             args="$args skia_use_piex=true"
-            # Android 平台的 Dawn WebGPU 支持
-            args="$args skia_use_webgpu_dawn=true"
-            # 设置 C++20 标准
-            args="$args extra_cflags_cc=[\"-std=c++20\", \"-stdlib=libc++\"]"
             ;;
         esac
         
         echo "BUILD_ARGS=$args" >> $GITHUB_ENV
       shell: bash
       
-    # 使用 GN 生成构建文件
-    - name: 生成 Skia 构建文件
+    # 使用GN生成构建文件
+    - name: 生成Skia构建文件
       run: |
         cd skia
         echo "正在为 ${{ matrix.target_os }} 平台生成构建文件..."
         bin/gn gen out/Release --args="$BUILD_ARGS"
-        echo "构建配置完成，已启用 Graphite 和 Dawn WebGPU 支持"
+        echo "构建配置完成"
       shell: bash
       
-    # 使用 Ninja 编译 Skia
-    - name: 编译 Skia
+    # 使用Ninja编译Skia
+    - name: 编译Skia
       run: |
         cd skia
-        echo "开始编译 ${{ matrix.target_os }} 平台的 Skia（启用 Graphite + Dawn）..."
+        echo "开始编译 ${{ matrix.target_os }} 平台的Skia..."
         # 根据平台设置并行编译线程数
         if [ "${{ matrix.target_os }}" = "android" ]; then
-          # Android 构建使用 10 线程
-          ninja -C out/Release -j10
-        else
-          # 其他平台使用 8 线程
+          # Android构建使用8线程
           ninja -C out/Release -j8
+        else
+          # 其他平台使用6线程
+          ninja -C out/Release -j6
         fi
-        echo "✅ ${{ matrix.target_os }} 平台 Skia 编译完成"
+        echo "✅ ${{ matrix.target_os }} 平台Skia编译完成"
       shell: bash
       
-    # 创建发布包并整理文件
-    - name: 创建 Skia 发布包
+    # 创建平台特定的构建产物目录
+    - name: 创建平台构建产物
       run: |
         cd skia
         
-        # 创建输出目录结构
-        mkdir -p "Skia/bin/${{ matrix.platform }}/${{ matrix.arch }}"
-        mkdir -p "Skia/lib/${{ matrix.platform }}/${{ matrix.arch }}"
-        mkdir -p Skia/include
-        mkdir -p Skia/modules
-        mkdir -p Skia/examples
-        
-        # 复制头文件到包目录
-        cp -r include/* Skia/include/
-        
-        # 复制 modules 目录
-        if [ -d "modules" ]; then
-          cp -r modules/* Skia/modules/ 2>/dev/null || true
-        fi
-        
-        # 复制 third_party 中的重要头文件
-        if [ -d "third_party" ]; then
-          mkdir -p Skia/third_party
-          # 复制 skcms 模块
-          if [ -d "third_party/skcms" ]; then
-            cp -r third_party/skcms Skia/third_party/ 2>/dev/null || true
-          fi
-          # 复制 dawn 相关头文件
-          if [ -d "third_party/dawn" ]; then
-            cp -r third_party/dawn Skia/third_party/ 2>/dev/null || true
-          fi
-          # 复制 Graphite 相关头文件
-          if [ -d "third_party/spirv-cross" ]; then
-            cp -r third_party/spirv-cross Skia/third_party/ 2>/dev/null || true
-          fi
-          # 复制其他重要头文件
-          find third_party -name "*.h" -o -name "*.hpp" | while read file; do
-            dir=$(dirname "$file")
-            mkdir -p "Skia/$dir"
-            cp "$file" "Skia/$file" 2>/dev/null || true
-          done
-        fi
+        # 创建平台特定目录
+        mkdir -p artifacts/${{ matrix.platform }}/${{ matrix.arch }}/lib
+        mkdir -p artifacts/${{ matrix.platform }}/${{ matrix.arch }}/bin
         
         # 根据不同平台复制相应的库文件和可执行文件
         case "${{ matrix.target_os }}" in
           "win")
-            # Windows 平台文件复制
-            find out/Release -name "*.lib" -exec cp {} "Skia/lib/${{ matrix.platform }}/${{ matrix.arch }}/" \; 2>/dev/null || true
-            find out/Release -name "*.dll" -exec cp {} "Skia/bin/${{ matrix.platform }}/${{ matrix.arch }}/" \; 2>/dev/null || true
-            find out/Release -name "*.exe" -exec cp {} "Skia/bin/${{ matrix.platform }}/${{ matrix.arch }}/" \; 2>/dev/null || true
+            # Windows平台文件复制
+            find out/Release -name "*.lib" -exec cp {} artifacts/${{ matrix.platform }}/${{ matrix.arch }}/lib/ \; 2>/dev/null || true
+            find out/Release -name "*.dll" -exec cp {} artifacts/${{ matrix.platform }}/${{ matrix.arch }}/bin/ \; 2>/dev/null || true
+            find out/Release -name "*.exe" -exec cp {} artifacts/${{ matrix.platform }}/${{ matrix.arch }}/bin/ \; 2>/dev/null || true
             ;;
           "mac")
-            # macOS 平台文件复制
-            find out/Release -name "*.a" -exec cp {} "Skia/lib/${{ matrix.platform }}/${{ matrix.arch }}/" \; 2>/dev/null || true
-            find out/Release -name "*.dylib" -exec cp {} "Skia/lib/${{ matrix.platform }}/${{ matrix.arch }}/" \; 2>/dev/null || true
-            find out/Release -type f -perm +111 -name "*" -not -name "*.so" -not -name "*.dylib" -exec cp {} "Skia/bin/${{ matrix.platform }}/${{ matrix.arch }}/" \; 2>/dev/null || true
+            # macOS平台文件复制
+            find out/Release -name "*.a" -exec cp {} artifacts/${{ matrix.platform }}/${{ matrix.arch }}/lib/ \; 2>/dev/null || true
+            find out/Release -name "*.dylib" -exec cp {} artifacts/${{ matrix.platform }}/${{ matrix.arch }}/lib/ \; 2>/dev/null || true
+            find out/Release -type f -perm +111 -name "*" -not -name "*.so" -not -name "*.dylib" -exec cp {} artifacts/${{ matrix.platform }}/${{ matrix.arch }}/bin/ \; 2>/dev/null || true
             ;;
           "linux"|"android")
-            # Linux 和 Android 平台文件复制
-            find out/Release -name "*.a" -exec cp {} "Skia/lib/${{ matrix.platform }}/${{ matrix.arch }}/" \; 2>/dev/null || true
-            find out/Release -name "*.so" -exec cp {} "Skia/lib/${{ matrix.platform }}/${{ matrix.arch }}/" \; 2>/dev/null || true
-            find out/Release -type f -perm +111 -name "*" -not -name "*.so" -exec cp {} "Skia/bin/${{ matrix.platform }}/${{ matrix.arch }}/" \; 2>/dev/null || true
+            # Linux和Android平台文件复制
+            find out/Release -name "*.a" -exec cp {} artifacts/${{ matrix.platform }}/${{ matrix.arch }}/lib/ \; 2>/dev/null || true
+            find out/Release -name "*.so" -exec cp {} artifacts/${{ matrix.platform }}/${{ matrix.arch }}/lib/ \; 2>/dev/null || true
+            find out/Release -type f -perm +111 -name "*" -not -name "*.so" -exec cp {} artifacts/${{ matrix.platform }}/${{ matrix.arch }}/bin/ \; 2>/dev/null || true
             ;;
         esac
         
-        # 复制示例文件
-        if [ -d "resources" ]; then
-          cp -r resources/* Skia/examples/ 2>/dev/null || true
-        fi
-        
-        # 创建构建信息文件
-        cat > Skia/BUILD_INFO.txt << EOF
-        Skia 完整构建信息（启用 Graphite 和 Dawn WebGPU）
-        ====================================================
-        平台: ${{ matrix.platform }}
-        架构: ${{ matrix.arch }}
-        构建模式: Release（官方完整构建）
-        C++ 标准: C++20
-        Graphite 支持: 已启用
-        Dawn WebGPU: 已启用
-        
-        编译器信息:
-        EOF
-        
-        # 根据平台添加编译器信息
-        case "${{ matrix.target_os }}" in
-          "win")
-            cat >> Skia/BUILD_INFO.txt << EOF
-        - 编译器: MSVC 2022
-        - 运行时: /MD（多线程 DLL）
-        - C++ 标准: /std:c++20
-        EOF
-            ;;
-          "mac")
-            cat >> Skia/BUILD_INFO.txt << EOF
-        - 编译器: Apple Clang（基于 LLVM）
-        - 标准库: libc++
-        - C++ 标准: -std=c++20
-        EOF
-            ;;
-          "linux")
-            cat >> Skia/BUILD_INFO.txt << EOF
-        - 编译器: GCC 13
-        - 标准库: libstdc++
-        - C++ 标准: -std=c++20
-        EOF
-            ;;
-          "android")
-            cat >> Skia/BUILD_INFO.txt << EOF
-        - 编译器: Clang 18（NDK r25c）
-        - 标准库: libc++
-        - C++ 标准: -std=c++20
-        - API 级别: ${{ matrix.android_api }}
-        EOF
-            ;;
-        esac
-        
-        cat >> Skia/BUILD_INFO.txt << EOF
-        
-        支持的功能:
-        - GPU 渲染（OpenGL + Vulkan + Graphite）
-        - Dawn WebGPU 后端
-        - PDF 导出（内置 HarfBuzz）
-        - SVG 支持
-        - Skottie 动画
-        - 文本整形（内置 HarfBuzz）
-        - 字体管理（内置 FreeType）
-        - 图像编解码
-        - 颜色管理（skcms 模块）
-        
-        图形后端:
-        - OpenGL/OpenGL ES
-        - Vulkan
-        - Graphite（下一代 GPU 后端）
-        - Dawn WebGPU
-        - Metal（仅 macOS）
-        - Direct3D（仅 Windows）
-        
-        Graphite 特性:
-        - 下一代 GPU 渲染架构
-        - 更好的性能和内存使用
-        - 多线程友好的设计
-        - 现代 GPU API 优化
-        - WebGPU 集成支持
-        
-        Dawn WebGPU 特性:
-        - 跨平台 WebGPU 实现
-        - 现代 GPU API 抽象
-        - 与 Graphite 深度集成
-        - 高性能计算着色器支持
-        - WGSL 着色器语言支持
-        EOF
-        
+        echo "✅ ${{ matrix.platform }}/${{ matrix.arch }} 构建产物已准备完成"
       shell: bash
       
-    # 上传构建产物到 GitHub Actions
-    - name: 上传 Skia 构建产物
+    # 上传平台特定构建产物
+    - name: 上传平台构建产物
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ matrix.platform }}_${{ matrix.arch }}
-        path: skia/Skia/
+        name: ${{ matrix.platform }}-${{ matrix.arch }}
+        path: skia/artifacts/
         retention-days: 30
-        
-  # 合并所有平台的构建产物
-  merge-artifacts:
+
+  # 创建统一的Skia构建包
+  create-unified-package:
     needs: build-skia
     runs-on: ubuntu-latest
+    
     steps:
+    # 检出代码仓库
+    - name: 检出代码仓库
+      uses: actions/checkout@v4
+      
+    # 设置Python环境（用于获取Skia头文件）
+    - name: 设置Python环境
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
+        
+    # 获取depot_tools工具集
+    - name: 获取depot_tools
+      run: |
+        git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+        echo "${{ github.workspace }}/depot_tools" >> $GITHUB_PATH
+        
+    # 获取Skia源代码（仅用于获取头文件和模块）
+    - name: 获取Skia源代码
+      run: |
+        git clone https://skia.googlesource.com/skia.git
+        cd skia
+        python tools/git-sync-deps
+        
+    # 下载所有平台的构建产物
     - name: 下载所有构建产物
       uses: actions/download-artifact@v4
       with:
         path: artifacts
         
-    - name: 合并构建产物
+    # 创建统一的Skia包结构
+    - name: 创建统一Skia包
       run: |
-        # 创建最终的目录结构
-        mkdir -p Skia_Final/Skia
+        # 创建Skia包的根目录结构
+        mkdir -p Skia/bin
+        mkdir -p Skia/lib
+        mkdir -p Skia/include
+        mkdir -p Skia/modules
+        mkdir -p Skia/examples
         
-        # 合并所有平台的构建产物
+        # 复制头文件到包目录
+        cp -r skia/include/* Skia/include/
+        
+        # 复制modules目录
+        if [ -d "skia/modules" ]; then
+          cp -r skia/modules/* Skia/modules/ 2>/dev/null || true
+        fi
+        
+        # 复制third_party中的模块相关文件
+        if [ -d "skia/third_party" ]; then
+          mkdir -p Skia/third_party
+          # 复制skcms模块
+          if [ -d "skia/third_party/skcms" ]; then
+            cp -r skia/third_party/skcms Skia/third_party/ 2>/dev/null || true
+          fi
+          # 复制其他可能需要的third_party模块
+          find skia/third_party -name "*.h" -o -name "*.hpp" | while read file; do
+            rel_path=$(echo "$file" | sed 's|skia/||')
+            dir=$(dirname "$rel_path")
+            mkdir -p "Skia/$dir"
+            cp "$file" "Skia/$rel_path" 2>/dev/null || true
+          done
+        fi
+        
+        # 复制示例文件
+        if [ -d "skia/resources" ]; then
+          cp -r skia/resources/* Skia/examples/ 2>/dev/null || true
+        fi
+        
+        # 整理所有平台的构建产物到统一结构
         for artifact_dir in artifacts/*/; do
           if [ -d "$artifact_dir" ]; then
-            cp -r "$artifact_dir"* Skia_Final/Skia/ 2>/dev/null || true
+            # 复制平台特定的bin和lib文件夹到统一结构中
+            cp -r "$artifact_dir"* Skia/ 2>/dev/null || true
           fi
         done
         
-    # 生成支持 Graphite 的 CMakeLists.txt 文件
-    - name: 生成 Skia CMakeLists.txt
-      run: |
-        cd Skia_Final
+        echo "✅ 统一Skia包结构创建完成"
         
-        # 生成 CMakeLists.txt 文件，支持所有平台、Graphite 和 C++20
+    # 生成统一的CMakeLists.txt文件
+    - name: 生成统一CMakeLists.txt
+      run: |
         cat > Skia/CMakeLists.txt << 'EOF'
-        # Skia 图形库的 CMake 配置文件（全平台支持 + Graphite + Dawn WebGPU）
-        cmake_minimum_required(VERSION 3.20)
+        # Skia图形库的CMake配置文件（全平台统一支持）
+        cmake_minimum_required(VERSION 3.15)
         
         # 设置项目信息
         project(SkiaPrebuilt
             VERSION 1.0.0
-            DESCRIPTION "完整预编译的 Skia 图形库（启用 Graphite 和 Dawn WebGPU）"
+            DESCRIPTION "完整预编译的Skia图形库 - 统一全平台包"
             LANGUAGES CXX C
         )
         
-        # 设置 C++20 标准
-        set(CMAKE_CXX_STANDARD 20)
+        # 设置C++标准
+        set(CMAKE_CXX_STANDARD 17)
         set(CMAKE_CXX_STANDARD_REQUIRED ON)
-        set(CMAKE_CXX_EXTENSIONS OFF)
         
         # 获取当前目录
         get_filename_component(SKIA_ROOT_DIR "${CMAKE_CURRENT_LIST_DIR}" ABSOLUTE)
         
-        # 创建 skdn（Skia + Dawn）接口库
-        add_library(skdn INTERFACE)
-        add_library(skdn::skdn ALIAS skdn)
-        
-        # 创建传统的 skia 接口库（向后兼容）
-        add_library(skia INTERFACE)
-        add_library(skia::skia ALIAS skia)
+        # 创建Skia::Skia接口库
+        add_library(Skia INTERFACE)
+        add_library(Skia::Skia ALIAS Skia)
         
         # 设置包含目录
-        target_include_directories(skdn INTERFACE
+        target_include_directories(Skia INTERFACE
             $<BUILD_INTERFACE:${SKIA_ROOT_DIR}>
+            $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/include>
             $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/modules>
             $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/third_party>
-            $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/third_party/dawn/include>
-            $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/third_party/spirv-cross>
             $<INSTALL_INTERFACE:.>
+            $<INSTALL_INTERFACE:include>
             $<INSTALL_INTERFACE:modules>
             $<INSTALL_INTERFACE:third_party>
-            $<INSTALL_INTERFACE:third_party/dawn/include>
-            $<INSTALL_INTERFACE:third_party/spirv-cross>
-        )
-        
-        # skia 库使用相同的包含目录
-        target_include_directories(skia INTERFACE
-            $<BUILD_INTERFACE:${SKIA_ROOT_DIR}>
-            $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/modules>
-            $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/third_party>
-            $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/third_party/dawn/include>
-            $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/third_party/spirv-cross>
-            $<INSTALL_INTERFACE:.>
-            $<INSTALL_INTERFACE:modules>
-            $<INSTALL_INTERFACE:third_party>
-            $<INSTALL_INTERFACE:third_party/dawn/include>
-            $<INSTALL_INTERFACE:third_party/spirv-cross>
         )
         
         # 检测当前平台和架构
         if(WIN32)
-            set(PLATFORM_NAME "Win")
+            set(SKIA_PLATFORM "Win")
             if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-                set(ARCH_NAME "x64")
+                set(SKIA_ARCH "x64")
             else()
-                set(ARCH_NAME "x86")
+                set(SKIA_ARCH "x86")
             endif()
         elseif(APPLE)
-            set(PLATFORM_NAME "macOS")
+            set(SKIA_PLATFORM "macOS")
             if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
-                set(ARCH_NAME "arm64")
+                set(SKIA_ARCH "arm64")
             else()
-                set(ARCH_NAME "x64")
+                set(SKIA_ARCH "x64")
             endif()
         elseif(ANDROID)
-            set(PLATFORM_NAME "Android")
+            set(SKIA_PLATFORM "Android")
             if(CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a")
-                set(ARCH_NAME "arm64")
+                set(SKIA_ARCH "arm64")
             elseif(CMAKE_ANDROID_ARCH_ABI STREQUAL "x86_64")
-                set(ARCH_NAME "x64")
+                set(SKIA_ARCH "x64")
             else()
-                set(ARCH_NAME "arm64")  # 默认
+                set(SKIA_ARCH "x64")  # 默认
             endif()
         else()
-            set(PLATFORM_NAME "Linux")
+            set(SKIA_PLATFORM "Linux")
             if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-                set(ARCH_NAME "x64")
+                set(SKIA_ARCH "x64")
             else()
-                set(ARCH_NAME "x86")
+                set(SKIA_ARCH "x86")
             endif()
         endif()
         
-        # 设置库文件路径
-        set(SKIA_LIB_DIR "${SKIA_ROOT_DIR}/lib/${PLATFORM_NAME}/${ARCH_NAME}")
+        # 设置平台特定的库路径
+        set(SKIA_LIB_DIR "${SKIA_ROOT_DIR}/lib/${SKIA_PLATFORM}/${SKIA_ARCH}")
+        set(SKIA_BIN_DIR "${SKIA_ROOT_DIR}/bin/${SKIA_PLATFORM}/${SKIA_ARCH}")
         
-        # 查找所有的库文件
+        # 检查库目录是否存在
+        if(NOT EXISTS "${SKIA_LIB_DIR}")
+            message(WARNING "Skia库目录不存在: ${SKIA_LIB_DIR}")
+            message(STATUS "当前平台: ${SKIA_PLATFORM}, 架构: ${SKIA_ARCH}")
+            # 尝试查找可用的平台目录
+            file(GLOB AVAILABLE_PLATFORMS "${SKIA_ROOT_DIR}/lib/*")
+            if(AVAILABLE_PLATFORMS)
+                message(STATUS "可用的平台目录:")
+                foreach(platform_dir ${AVAILABLE_PLATFORMS})
+                    get_filename_component(platform_name "${platform_dir}" NAME)
+                    file(GLOB AVAILABLE_ARCHS "${platform_dir}/*")
+                    foreach(arch_dir ${AVAILABLE_ARCHS})
+                        get_filename_component(arch_name "${arch_dir}" NAME)
+                        message(STATUS "  - ${platform_name}/${arch_name}")
+                    endforeach()
+                endforeach()
+            endif()
+        endif()
+        
+        # 查找Skia库文件
         file(GLOB SKIA_LIBRARIES "${SKIA_LIB_DIR}/*")
+        if(NOT SKIA_LIBRARIES)
+            message(WARNING "在 ${SKIA_LIB_DIR} 中未找到Skia库文件")
+        endif()
         
         # 根据平台设置特定的链接库和编译选项
         if(WIN32)
-            # Windows 平台配置 - 启用 Graphite 和 Dawn
-            target_compile_definitions(skdn INTERFACE
+            # Windows平台配置 - 启用Graphite和Ganesh
+            target_compile_definitions(Skia INTERFACE
                 SK_GANESH=1
                 SK_GRAPHITE=1
-                SK_DAWN=1
                 SK_VULKAN=1
                 SK_GL=1
                 SK_BUILD_FOR_WIN=1
@@ -608,23 +506,22 @@ jobs:
                 SK_ENABLE_SVG=1
                 UNICODE
                 _UNICODE
-                NOMINMAX
             )
             
-            # 设置 Windows 运行时为 /MD（多线程 DLL）
-            target_compile_options(skdn INTERFACE
+            # 设置Windows运行时为/MD（多线程DLL）
+            target_compile_options(Skia INTERFACE
                 $<$<CONFIG:Debug>:/MDd>
                 $<$<CONFIG:Release>:/MD>
                 $<$<CONFIG:RelWithDebInfo>:/MD>
                 $<$<CONFIG:MinSizeRel>:/MD>
             )
             
-            # 添加 Windows 系统库
-            target_link_libraries(skdn INTERFACE
+            # 添加Windows系统库
+            target_link_libraries(Skia INTERFACE
                 ${SKIA_LIBRARIES}
-                # OpenGL 相关
+                # OpenGL相关
                 OpenGL32
-                # DirectX 相关
+                # DirectX相关
                 d3d11
                 dxgi
                 d3dcompiler
@@ -642,17 +539,13 @@ jobs:
                 Usp10
                 # 网络
                 Ws2_32
-                # Dawn WebGPU 相关
-                dxva2
-                bcrypt
             )
             
         elseif(APPLE)
-            # macOS 平台配置 - 启用 Graphite 和 Dawn
-            target_compile_definitions(skdn INTERFACE
+            # macOS平台配置 - 启用Graphite和Ganesh
+            target_compile_definitions(Skia INTERFACE
                 SK_GANESH=1
                 SK_GRAPHITE=1
-                SK_DAWN=1
                 SK_METAL=1
                 SK_GL=1
                 SK_VULKAN=1
@@ -661,7 +554,7 @@ jobs:
                 SK_ENABLE_SVG=1
             )
             
-            # 查找 macOS 系统框架
+            # 查找macOS系统框架
             find_library(FOUNDATION_FRAMEWORK Foundation)
             find_library(COREGRAPHICS_FRAMEWORK CoreGraphics)
             find_library(CORETEXT_FRAMEWORK CoreText)
@@ -673,7 +566,7 @@ jobs:
             find_library(QUARTZCORE_FRAMEWORK QuartzCore)
             find_library(IOSURFACE_FRAMEWORK IOSurface)
             
-            target_link_libraries(skdn INTERFACE
+            target_link_libraries(Skia INTERFACE
                 ${SKIA_LIBRARIES}
                 ${FOUNDATION_FRAMEWORK}
                 ${COREGRAPHICS_FRAMEWORK}
@@ -688,12 +581,11 @@ jobs:
             )
             
         elseif(ANDROID)
-            # Android 平台配置 - 启用 Graphite 和 Dawn
-            target_compile_definitions(skdn INTERFACE
+            # Android平台配置 - 启用Graphite和Ganesh
+            target_compile_definitions(Skia INTERFACE
                 ANDROID
                 SK_GANESH=1
                 SK_GRAPHITE=1
-                SK_DAWN=1
                 SK_VULKAN=1
                 SK_GL=1
                 SK_BUILD_FOR_ANDROID=1
@@ -702,20 +594,20 @@ jobs:
                 __ANDROID_API__=21
             )
             
-            target_compile_options(skdn INTERFACE
+            target_compile_options(Skia INTERFACE
                 -fPIC
                 -fno-rtti
                 -fno-exceptions
             )
             
-            target_link_libraries(skdn INTERFACE
+            target_link_libraries(Skia INTERFACE
                 ${SKIA_LIBRARIES}
-                # OpenGL ES 相关
+                # OpenGL ES相关
                 GLESv2
                 EGL
-                # Vulkan 相关
+                # Vulkan相关
                 vulkan
-                # Android 系统库
+                # Android系统库
                 android
                 log
                 jnigraphics
@@ -727,18 +619,17 @@ jobs:
                 z
             )
             
-            # Android 特定的链接选项
-            target_link_options(skdn INTERFACE
+            # Android特定的链接选项
+            target_link_options(Skia INTERFACE
                 -Wl,--gc-sections
                 -Wl,--as-needed
             )
             
         else()
-            # Linux 平台配置 - 启用 Graphite 和 Dawn
-            target_compile_definitions(skdn INTERFACE
+            # Linux平台配置 - 启用Graphite和Ganesh
+            target_compile_definitions(Skia INTERFACE
                 SK_GANESH=1
                 SK_GRAPHITE=1
-                SK_DAWN=1
                 SK_VULKAN=1
                 SK_GL=1
                 SK_BUILD_FOR_UNIX=1
@@ -753,13 +644,13 @@ jobs:
                 pkg_check_modules(HARFBUZZ QUIET harfbuzz)
             endif()
             
-            # 查找 Vulkan
+            # 查找Vulkan
             find_package(Vulkan QUIET)
             
-            # 查找 X11 相关库
+            # 查找X11相关库
             find_package(X11 QUIET)
             
-            target_link_libraries(skdn INTERFACE
+            target_link_libraries(Skia INTERFACE
                 ${SKIA_LIBRARIES}
                 # OpenGL
                 GL
@@ -769,185 +660,186 @@ jobs:
                 m
             )
             
-            # FontConfig 支持
+            # FontConfig支持
             if(FONTCONFIG_FOUND)
-                target_link_libraries(skdn INTERFACE ${FONTCONFIG_LIBRARIES})
-                target_include_directories(skdn INTERFACE ${FONTCONFIG_INCLUDE_DIRS})
+                target_link_libraries(Skia INTERFACE ${FONTCONFIG_LIBRARIES})
+                target_include_directories(Skia INTERFACE ${FONTCONFIG_INCLUDE_DIRS})
             endif()
             
-            # HarfBuzz 支持
+            # HarfBuzz支持
             if(HARFBUZZ_FOUND)
-                target_link_libraries(skdn INTERFACE ${HARFBUZZ_LIBRARIES})
-                target_include_directories(skdn INTERFACE ${HARFBUZZ_INCLUDE_DIRS})
+                target_link_libraries(Skia INTERFACE ${HARFBUZZ_LIBRARIES})
+                target_include_directories(Skia INTERFACE ${HARFBUZZ_INCLUDE_DIRS})
             endif()
             
-            # 添加 Vulkan 支持
+            # 添加Vulkan支持
             if(Vulkan_FOUND)
-                target_link_libraries(skdn INTERFACE ${Vulkan_LIBRARIES})
-                target_include_directories(skdn INTERFACE ${Vulkan_INCLUDE_DIRS})
+                target_link_libraries(Skia INTERFACE ${Vulkan_LIBRARIES})
+                target_include_directories(Skia INTERFACE ${Vulkan_INCLUDE_DIRS})
             endif()
             
-            # 添加 X11 支持
+            # 添加X11支持
             if(X11_FOUND)
-                target_link_libraries(skdn INTERFACE
+                target_link_libraries(Skia INTERFACE
                     ${X11_LIBRARIES}
                     ${X11_Xrandr_LIB}
                     ${X11_Xinerama_LIB}
                     ${X11_Xcursor_LIB}
                     ${X11_Xi_LIB}
                 )
-                target_include_directories(skdn INTERFACE ${X11_INCLUDE_DIR})
+                target_include_directories(Skia INTERFACE ${X11_INCLUDE_DIR})
             endif()
         endif()
         
-        # 向后兼容的 skia 库使用相同的设置
-        target_compile_definitions(skia INTERFACE $<TARGET_PROPERTY:skdn,INTERFACE_COMPILE_DEFINITIONS>)
-        target_compile_options(skia INTERFACE $<TARGET_PROPERTY:skdn,INTERFACE_COMPILE_OPTIONS>)
-        target_link_libraries(skia INTERFACE $<TARGET_PROPERTY:skdn,INTERFACE_LINK_LIBRARIES>)
-        target_link_options(skia INTERFACE $<TARGET_PROPERTY:skdn,INTERFACE_LINK_OPTIONS>)
-        
-        # 设置编译特性
-        target_compile_features(skdn INTERFACE cxx_std_20)
-        target_compile_features(skia INTERFACE cxx_std_20)
+        # 设置编译选项
+        target_compile_features(Skia INTERFACE cxx_std_17)
         
         # 优化设置
-        target_compile_options(skdn INTERFACE
-            $<$<CONFIG:Debug>:-g -O0>
-            $<$<CONFIG:Release>:-O3 -DNDEBUG>
-            $<$<CONFIG:RelWithDebInfo>:-O2 -g -DNDEBUG>
-        )
-        
-        target_compile_options(skia INTERFACE
+        target_compile_options(Skia INTERFACE
             $<$<CONFIG:Debug>:-g -O0>
             $<$<CONFIG:Release>:-O3 -DNDEBUG>
             $<$<CONFIG:RelWithDebInfo>:-O2 -g -DNDEBUG>
         )
         
         # 设置预处理器定义
-        target_compile_definitions(skdn INTERFACE
+        target_compile_definitions(Skia INTERFACE
             $<$<CONFIG:Debug>:SK_DEBUG>
             $<$<CONFIG:Release>:SK_RELEASE>
         )
         
-        target_compile_definitions(skia INTERFACE
-            $<$<CONFIG:Debug>:SK_DEBUG>
-            $<$<CONFIG:Release>:SK_RELEASE>
-        )
-        
-        # 创建便利函数用于简化使用
-        function(AddSkiaGraphiteSupport target)
-            target_link_libraries(${target} PRIVATE skdn::skdn)
-            target_compile_features(${target} PRIVATE cxx_std_20)
-            
-            # 添加有用的编译定义
-            target_compile_definitions(${target} PRIVATE
-                SK_USE_GRAPHITE=1
-                SK_USE_DAWN=1
-            )
-            
-            message(STATUS "已为目标 ${target} 启用 Skia Graphite 和 Dawn WebGPU 支持")
-        endfunction()
-        
-        # 提供有用的信息
-        message(STATUS "Skia 预编译库配置完成")
-        message(STATUS "平台: ${PLATFORM_NAME}")
-        message(STATUS "架构: ${ARCH_NAME}")
-        message(STATUS "库目录: ${SKIA_LIB_DIR}")
-        message(STATUS "C++ 标准: C++20")
-        message(STATUS "支持的特性:")
-        message(STATUS "  ✅ Ganesh GPU 后端")
-        message(STATUS "  ✅ Graphite GPU 后端（下一代）")
-        message(STATUS "  ✅ Dawn WebGPU 后端")
-        message(STATUS "  ✅ 完整的 2D 图形功能")
-        message(STATUS "  ✅ PDF/SVG/动画支持")
-        message(STATUS "  ✅ 现代 C++20 支持")
-        message(STATUS "使用方法:")
-        message(STATUS "  推荐: target_link_libraries(your_target skdn::skdn)")
-        message(STATUS "  兼容: target_link_libraries(your_target skia::skia)")
-        message(STATUS "  便利: AddSkiaGraphiteSupport(your_target)")
+        # 输出配置信息
+        message(STATUS "Skia配置信息:")
+        message(STATUS "  平台: ${SKIA_PLATFORM}")
+        message(STATUS "  架构: ${SKIA_ARCH}")
+        message(STATUS "  库目录: ${SKIA_LIB_DIR}")
+        message(STATUS "  二进制目录: ${SKIA_BIN_DIR}")
+        if(SKIA_LIBRARIES)
+            message(STATUS "  找到的库文件数量: ${CMAKE_MATCH_COUNT}")
+        endif()
         EOF
         
-    - name: 创建最终 ZIP 包
+    # 创建构建信息文件
+    - name: 创建构建信息文件
       run: |
-        cd Skia_Final
+        cat > Skia/BUILD_INFO.txt << EOF
+        Skia 全平台统一构建包
+        ========================
+        构建日期: $(date +"%Y-%m-%d %H:%M:%S UTC")
+        构建版本: v${{ github.run_number }}
         
-        # 创建统一的构建信息文件
-        cat > Skia/BUILD_INFO_COMBINED.txt << EOF
-        Skia 全平台构建包（启用 Graphite + Dawn WebGPU + C++20）
-        ========================================================
+        支持的平台和架构:
         
-        包含平台:
-        - Windows x64（MSVC 2022）
-        - macOS x64 & ARM64（Apple Clang）
-        - Linux x64（GCC 13）
-        - Android x64 & ARM64（Clang 18）
+        桌面平台:
+        - Windows x64 (Win/x64)
+          * GPU后端: Direct3D + OpenGL + Vulkan + Graphite
+          * 运行时: /MD (多线程DLL)
         
-        主要特性:
-        ✅ C++20 标准支持
-        ✅ Ganesh GPU 后端（传统）
-        ✅ Graphite GPU 后端（下一代）
-        ✅ Dawn WebGPU 支持
-        ✅ 完整的 2D 图形功能
-        ✅ PDF/SVG/动画支持
-        ✅ 内置字体和文本处理
-        ✅ 跨平台兼容性
-        ✅ 现代编译器支持
+        - macOS Intel x64 (macOS/x64)
+        - macOS Apple Silicon ARM64 (macOS/arm64)
+          * GPU后端: Metal + OpenGL + Vulkan + Graphite
+          * 完整DNG RAW支持
+        
+        - Linux x64 (Linux/x64)
+          * GPU后端: OpenGL + Vulkan + Graphite
+          * X11完整支持
+        
+        移动平台:
+        - Android x64 (Android/x64)
+        - Android ARM64 (Android/arm64)
+          * GPU后端: OpenGL ES + Vulkan + Graphite
+          * Android API级别: 21+
+          * NDK版本: r25c
+        
+        支持的功能:
+        ============
+        - GPU渲染 (Ganesh + Graphite后端)
+        - PDF导出 (内置HarfBuzz)
+        - SVG支持
+        - Skottie动画
+        - 文本整形 (内置HarfBuzz)
+        - 字体管理 (内置FreeType)
+        - 图像编解码
+        - 颜色管理 (skcms模块)
+        - RAW图像处理 (DNG SDK)
         
         使用方法:
-        1. 解压到项目目录
-        2. 在 CMakeLists.txt 中添加:
-           set(CMAKE_CXX_STANDARD 20)
-           add_subdirectory(path/to/Skia)
-           target_link_libraries(your_target skdn::skdn)
+        =========
         
-        或使用便利函数:
-           AddSkiaGraphiteSupport(your_target)
+        CMake集成:
         
-        Graphite 优势:
-        - 现代 GPU 架构优化
-        - 更好的多线程性能
-        - 降低 CPU 开销
-        - WebGPU 标准支持
-        - 与 Dawn 深度集成
+        \`\`\`cmake
+        # 设置C++17标准
+        set(CMAKE_CXX_STANDARD 17)
+        set(CMAKE_CXX_STANDARD_REQUIRED ON)
         
-        Dawn WebGPU 优势:
-        - 跨平台 GPU 计算
-        - 现代着色器支持（WGSL）
-        - 高性能图形渲染
-        - 未来标准兼容
+        # 添加Skia子目录
+        add_subdirectory(path/to/Skia)
         
-        编译器支持:
-        - Windows: MSVC 2022 + /std:c++20
-        - macOS: Apple Clang + -std=c++20
-        - Linux: GCC 13 + -std=c++20
-        - Android: Clang 18 + -std=c++20
+        # 链接到您的目标
+        target_link_libraries(your_target Skia::Skia)
+        \`\`\`
         
-        技术亮点:
-        - 全新的 Graphite 渲染架构
-        - 完整的 Dawn WebGPU 集成
-        - 现代 C++20 特性支持
-        - 优化的多线程性能
-        - 生产环境就绪
+        目录结构:
+        =========
+        Skia/
+        ├── include/           # Skia头文件
+        ├── modules/           # Skia模块
+        ├── third_party/       # 第三方依赖头文件
+        ├── examples/          # 示例资源文件
+        ├── bin/               # 平台特定的二进制文件
+        │   ├── Win/x64/
+        │   ├── macOS/x64/
+        │   ├── macOS/arm64/
+        │   ├── Linux/x64/
+        │   ├── Android/x64/
+        │   └── Android/arm64/
+        ├── lib/               # 平台特定的库文件
+        │   ├── Win/x64/
+        │   ├── macOS/x64/
+        │   ├── macOS/arm64/
+        │   ├── Linux/x64/
+        │   ├── Android/x64/
+        │   └── Android/arm64/
+        ├── CMakeLists.txt     # CMake配置文件
+        └── BUILD_INFO.txt     # 此文件
+        
+        特殊说明:
+        =========
+        - CMakeLists.txt会自动检测当前平台和架构
+        - 使用内置FreeType和HarfBuzz库以避免系统依赖冲突
+        - 所有依赖都已静态链接
+        - 已启用Graphite现代GPU后端
+        - 生产环境就绪，包含完整优化构建
+        - 支持跨平台开发和部署
         EOF
         
-        # 打包成 ZIP 文件
-        zip -r Skia_Prebuilt.zip Skia/
+    # 打包统一的Skia构建包
+    - name: 打包Skia_Prebuilt.zip
+      run: |
+        # 使用zip命令打包整个Skia目录
+        zip -r "Skia_Prebuilt.zip" Skia/
         
-    - name: 上传最终构建包
+        echo "✅ Skia_Prebuilt.zip 统一构建包创建完成"
+        
+        # 输出包的大小信息
+        ls -lh Skia_Prebuilt.zip
+        
+    # 上传统一构建包
+    - name: 上传Skia统一构建包
       uses: actions/upload-artifact@v4
       with:
         name: Skia_Prebuilt
-        path: Skia_Final/Skia_Prebuilt.zip
-        retention-days: 90
-        
-  # 创建 GitHub Release 发布（仅在推送到主分支或定时任务或手动触发时）
+        path: Skia_Prebuilt.zip
+        retention-days: 30
+        compression-level: 0
+
+  # 创建GitHub Release发布（仅在推送到主分支或定时任务时）
   create-release:
-    needs: merge-artifacts
+    needs: create-unified-package
     runs-on: ubuntu-latest
     if: |
       (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) ||
-      github.event_name == 'schedule' ||
-      github.event_name == 'workflow_dispatch'
+      github.event_name == 'schedule'
     
     permissions:
       contents: write
@@ -958,8 +850,8 @@ jobs:
     - name: 检出代码仓库
       uses: actions/checkout@v4
       
-    # 下载最终构建包
-    - name: 下载 Skia 构建包
+    # 下载统一构建包
+    - name: 下载Skia统一构建包
       uses: actions/download-artifact@v4
       with:
         name: Skia_Prebuilt
@@ -970,202 +862,126 @@ jobs:
       id: get_tag
       run: |
         if [ "${{ github.event_name }}" = "schedule" ]; then
-          echo "tag=skia-graphite-daily-$(date +%Y%m%d)" >> $GITHUB_OUTPUT
-          echo "name=Skia Graphite 全平台每日构建包 $(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
+          echo "tag=skia-prebuilt-daily-$(date +%Y%m%d)" >> $GITHUB_OUTPUT
+          echo "name=Skia预编译统一包 每日构建 $(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
         else
-          echo "tag=skia-graphite-v${{ github.run_number }}" >> $GITHUB_OUTPUT
-          echo "name=Skia Graphite 全平台构建包 v${{ github.run_number }}" >> $GITHUB_OUTPUT
+          echo "tag=skia-prebuilt-v${{ github.run_number }}" >> $GITHUB_OUTPUT
+          echo "name=Skia预编译统一包 v${{ github.run_number }}" >> $GITHUB_OUTPUT
         fi
         
-    # 创建 GitHub Release 发布版本
-    - name: 创建 GitHub Release
+    # 创建GitHub Release发布版本
+    - name: 创建GitHub Release
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.get_tag.outputs.tag }}
         name: ${{ steps.get_tag.outputs.name }}
         body: |
-          # 🚀 Skia 全平台构建包（启用 Graphite + Dawn + C++20）
+          # Skia 全平台预编译统一构建包
           
-          这个发布包包含了启用 **Graphite**、**Dawn WebGPU** 和 **C++20** 的 Skia 图形库全平台预编译版本。
+          这是一个包含所有支持平台的Skia图形库完整预编译版本，支持Graphite和Ganesh双GPU后端。
           
-          ## 🎯 新特性
+          ## 📦 包含内容
           
-          ### C++20 标准支持
-          - 🔥 **现代 C++**: 完整支持 C++20 标准和特性
-          - ⚡ **性能优化**: 利用 C++20 的编译时优化
-          - 🧵 **协程支持**: 为异步图形操作做好准备
-          - 🎮 **概念支持**: 更好的模板错误信息
+          **Skia_Prebuilt.zip** - 统一全平台构建包
           
-          ### Graphite 渲染后端
-          - 🔥 **下一代GPU架构**: 专为现代GPU设计的全新渲染后端
-          - ⚡ **极致性能**: 显著降低CPU开销，提升GPU利用率
-          - 🧵 **多线程友好**: 原生支持多线程渲染管线
-          - 🎮 **现代API**: 基于Vulkan/Metal/Direct3D 12设计
+          ## 🏗️ 支持的平台
           
-          ### Dawn WebGPU 支持
-          - 🌐 **WebGPU标准**: 完整支持最新WebGPU规范
-          - ⚡ **GPU计算**: 高性能计算着色器支持
-          - 🔧 **现代工具链**: 与Graphite深度集成
-          - 📱 **跨平台**: 统一的GPU抽象层
+          ### 桌面平台
+          - **Windows x64** (`Win/x64`)
+            - GPU后端: Direct3D + OpenGL + Vulkan + **Graphite**
+            - 运行时: /MD (多线程DLL)
           
-          ## 📦 包含平台
+          - **macOS Intel x64** (`macOS/x64`)
+          - **macOS Apple Silicon ARM64** (`macOS/arm64`)
+            - GPU后端: Metal + OpenGL + Vulkan + **Graphite**
+            - 完整DNG RAW支持
           
-          | 平台 | 架构 | 编译器 | GPU后端 | C++标准 |
-          |------|------|--------|---------|---------|
-          | **Windows** | x64 | MSVC 2022 | DirectX 12 + Vulkan + OpenGL + Graphite + Dawn | /std:c++20 |
-          | **macOS** | x64 + ARM64 | Apple Clang | Metal + Vulkan + OpenGL + Graphite + Dawn | -std=c++20 |
-          | **Linux** | x64 | GCC 13 | Vulkan + OpenGL + Graphite + Dawn | -std=c++20 |
-          | **Android** | x64 + ARM64 | Clang 18 (NDK r25c) | Vulkan + OpenGL ES + Graphite + Dawn | -std=c++20 |
+          - **Linux x64** (`Linux/x64`)
+            - GPU后端: OpenGL + Vulkan + **Graphite**
+            - X11完整支持
           
-          ## 🚀 快速开始
+          ### 移动平台
+          - **Android x64** (`Android/x64`)
+          - **Android ARM64** (`Android/arm64`)
+            - GPU后端: OpenGL ES + Vulkan + **Graphite**
+            - Android API级别: 21+
+            - NDK版本: r25c
           
-          ### CMake 集成（推荐）
+          ## 🚀 主要特性
+          
+          - ✨ **Graphite新一代GPU后端** - 现代化渲染管线
+          - 🎨 完整的Skia核心功能
+          - 🖥️ GPU加速渲染 (Ganesh + Graphite双后端)
+          - 📄 PDF/SVG/动画支持
+          - 🔤 内置字体和文本处理
+          - 🖼️ 图像编解码支持
+          - 🎨 颜色管理 (skcms模块)
+          - 📱 Android平台完整支持
+          - 🔧 生产环境就绪
+          - 📁 统一目录结构，自动平台检测
+          
+          ## 📋 使用方法
+          
+          ### CMake集成
           
           ```cmake
-          # 设置 C++20 标准
-          set(CMAKE_CXX_STANDARD 20)
+          # 设置C++17标准
+          set(CMAKE_CXX_STANDARD 17)
           set(CMAKE_CXX_STANDARD_REQUIRED ON)
           
-          # 添加 Skia 子目录
+          # 解压并添加Skia目录
           add_subdirectory(path/to/Skia)
           
-          # 方法一：使用推荐的 skdn 库（包含 Graphite + Dawn）
-          target_link_libraries(your_target skdn::skdn)
-          
-          # 方法二：使用便利函数（自动配置）
-          AddSkiaGraphiteSupport(your_target)
-          
-          # 方法三：传统方式（向后兼容）
-          target_link_libraries(your_target skia::skia)
+          # 链接到您的项目
+          target_link_libraries(your_target Skia::Skia)
           ```
           
-          ### 基础使用示例
+          ### 目录结构
           
-          ```cpp
-          #include "include/core/SkCanvas.h"
-          #include "include/core/SkSurface.h"
-          #include "include/gpu/graphite/Context.h"  // Graphite 支持
-          #include "include/gpu/dawn/DawnTypes.h"    // Dawn WebGPU 支持
-          
-          // 使用 Graphite 渲染
-          auto contextOptions = skgpu::graphite::ContextOptions{};
-          auto context = skgpu::graphite::Context::MakeVulkan(contextOptions);
-          
-          SkImageInfo info = SkImageInfo::MakeN32Premul(800, 600);
-          auto surface = SkSurface::MakeGraphite(context.get(), info);
-          auto canvas = surface->getCanvas();
-          
-          // 使用现代 C++20 特性
-          auto drawCircle = [&](auto center, auto radius, const SkPaint& paint) {
-              canvas->drawCircle(center.x(), center.y(), radius, paint);
-          };
-          
-          SkPoint center{400, 300};
-          drawCircle(center, 50.0f, paint);
+          ```
+          Skia/
+          ├── include/           # Skia头文件
+          ├── modules/           # Skia模块
+          ├── third_party/       # 第三方依赖
+          ├── examples/          # 示例资源
+          ├── bin/               # 平台二进制文件
+          │   ├── Win/x64/
+          │   ├── macOS/x64/
+          │   ├── macOS/arm64/
+          │   ├── Linux/x64/
+          │   ├── Android/x64/
+          │   └── Android/arm64/
+          ├── lib/               # 平台库文件  
+          │   ├── Win/x64/
+          │   ├── macOS/x64/
+          │   ├── macOS/arm64/
+          │   ├── Linux/x64/
+          │   ├── Android/x64/
+          │   └── Android/arm64/
+          ├── CMakeLists.txt     # 自动平台检测配置
+          └── BUILD_INFO.txt     # 详细构建信息
           ```
           
-          ## 🔧 高级特性
+          ## 🔧 技术特性
           
-          ### Graphite 配置
-          ```cpp
-          // 启用 Graphite 渲染
-          #define SK_GRAPHITE 1
-          #define SK_USE_GRAPHITE 1
+          - **自动平台检测**: CMake会自动检测当前平台和架构
+          - **内置依赖**: 使用内置FreeType和HarfBuzz避免系统依赖冲突
+          - **静态链接**: 所有依赖都已静态链接
+          - **双GPU后端**: 同时支持传统Ganesh和现代Graphite渲染后端
+          - **完整优化**: 生产环境优化构建
+          - **跨平台**: 支持Windows、macOS、Linux、Android全平台
           
-          // 创建 Graphite 上下文
-          skgpu::graphite::ContextOptions options;
-          options.fStoreContextRefInRecorder = true;
-          auto context = skgpu::graphite::Context::MakeVulkan(options);
-          ```
+          ## 📖 开始使用
           
-          ### Dawn WebGPU 配置
-          ```cpp
-          // 启用 Dawn WebGPU
-          #define SK_DAWN 1
-          #define SK_USE_DAWN 1
-          
-          // 创建 Dawn 设备
-          wgpu::Device device = CreateWebGPUDevice();
-          auto context = skgpu::graphite::Context::MakeDawn(device);
-          ```
-          
-          ### C++20 特性示例
-          ```cpp
-          #include <concepts>
-          #include <ranges>
-          #include <coroutine>
-          
-          // 使用概念约束
-          template<std::floating_point T>
-          void DrawWithPrecision(SkCanvas* canvas, T x, T y, T radius) {
-              SkPaint paint;
-              canvas->drawCircle(static_cast<SkScalar>(x), 
-                               static_cast<SkScalar>(y), 
-                               static_cast<SkScalar>(radius), paint);
-          }
-          
-          // 使用范围库
-          auto points = std::vector<SkPoint>{{0, 0}, {100, 100}, {200, 50}};
-          for (const auto& point : points | std::views::take(2)) {
-              canvas->drawPoint(point, paint);
-          }
-          ```
-          
-          ## 📋 系统要求
-          
-          ### Windows
-          - Windows 10 1909+ 或 Windows 11
-          - Visual Studio 2022 17.0+
-          - MSVC 2022 编译器
-          - DirectX 12 兼容显卡
-          
-          ### macOS
-          - macOS 11.0+ (Big Sur)
-          - Xcode 13+
-          - Apple Clang 13+
-          - Metal 兼容显卡
-          
-          ### Linux
-          - Ubuntu 22.04+ 或 equivalent
-          - GCC 13+ 或 Clang 15+
-          - Vulkan 1.2+ 驱动
-          - 现代 OpenGL 4.5+ 支持
-          
-          ### Android
-          - Android API 21+ (Android 5.0)
-          - NDK r25c+
-          - Clang 18+
-          - OpenGL ES 3.0+ 或 Vulkan 1.0+
-          
-          ## 🆕 版本亮点
-          
-          - ✅ **C++20 首发**: 完整的 C++20 标准支持
-          - ✅ **Graphite 完整版**: 生产就绪的 Graphite 渲染后端
-          - ✅ **Dawn 集成**: 深度集成的 WebGPU 支持
-          - ✅ **现代编译器**: 使用最新的编译器和工具链
-          - ✅ **性能优化**: 多线程和 GPU 优化
-          - ✅ **便利函数**: 简化的集成和配置
-          
-          ## 📖 文档和资源
-          
-          - [Skia 官方文档](https://skia.org/docs/)
-          - [Graphite 设计文档](https://skia.org/docs/dev/design/graphite/)
-          - [Dawn WebGPU 项目](https://dawn.googlesource.com/dawn)
-          - [WebGPU 规范](https://www.w3.org/TR/webgpu/)
-          - [C++20 特性参考](https://en.cppreference.com/w/cpp/20)
-          
-          ## 🐛 问题反馈
-          
-          如果遇到问题，请提供以下信息：
-          1. 操作系统和版本
-          2. 编译器和版本
-          3. CMake 版本
-          4. 错误信息和堆栈跟踪
-          5. 最小复现代码
+          1. 下载 `Skia_Prebuilt.zip`
+          2. 解压到您的项目目录
+          3. 在CMakeLists.txt中添加Skia子目录
+          4. 链接 `Skia::Skia` 目标到您的项目
+          5. 开始使用Skia强大的图形功能！
           
           ---
           
-          **构建信息**: 使用最新编译器，启用 C++20 标准，包含 Graphite 和 Dawn WebGPU 支持，生产环境就绪。
+          > **注意**: 此版本已启用Graphite现代GPU后端，提供更好的性能和现代化的渲染管线。同时保持与传统Ganesh后端的完全兼容性。
         files: |
           Skia_Prebuilt.zip
         draft: false
