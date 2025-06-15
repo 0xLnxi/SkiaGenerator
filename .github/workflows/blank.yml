@@ -138,8 +138,8 @@ jobs:
         python tools/git-sync-deps
       shell: bash
       
-    # 配置启用Dawn后端的构建参数
-    - name: 配置Dawn WebGPU构建参数
+    # 配置启用Dawn和Graphite后端的构建参数
+    - name: 配置Dawn WebGPU和Graphite构建参数
       run: |
         cd skia
         
@@ -159,8 +159,9 @@ jobs:
         args="$args skia_enable_svg=true"
         args="$args skia_use_icu=true"
         
-        # 启用GPU后端支持 - 包含Dawn WebGPU
+        # 启用GPU后端支持 - 包含Dawn WebGPU和Graphite
         args="$args skia_enable_gpu=true"
+        args="$args skia_enable_graphite=true"
         args="$args skia_use_gl=true"
         args="$args skia_use_vulkan=true"
         args="$args skia_use_dawn=true"
@@ -253,22 +254,22 @@ jobs:
       shell: bash
       
     # 使用GN生成构建文件
-    - name: 生成Dawn WebGPU构建文件
+    - name: 生成Dawn WebGPU和Graphite构建文件
       run: |
         cd skia
         bin/gn gen out/Release --args="$BUILD_ARGS"
       shell: bash
       
     # 使用Ninja编译Skia，启用6线程并行编译加速Dawn构建
-    - name: 编译Skia Dawn WebGPU版本
+    - name: 编译Skia Dawn WebGPU和Graphite版本
       run: |
         cd skia
-        # 使用-j6参数启用6线程并行编译（Dawn构建较复杂，需要更多线程）
+        # 使用-j6参数启用6线程并行编译（Dawn和Graphite构建较复杂，需要更多线程）
         ninja -C out/Release -j6
       shell: bash
       
     # 创建Dawn WebGPU发布包并整理文件
-    - name: 创建Dawn WebGPU发布包
+    - name: 创建Dawn WebGPU和Graphite发布包
       run: |
         cd skia
         
@@ -280,6 +281,7 @@ jobs:
         mkdir -p package/examples
         mkdir -p package/modules
         mkdir -p package/dawn
+        mkdir -p package/graphite
         
         # 复制头文件到包目录
         cp -r include/* package/include/
@@ -292,6 +294,12 @@ jobs:
         # 复制Dawn相关头文件
         if [ -d "third_party/externals/dawn/include" ]; then
           cp -r third_party/externals/dawn/include/* package/dawn/ 2>/dev/null || true
+        fi
+        
+        # 复制Graphite相关头文件（如果存在独立的graphite头文件目录）
+        if [ -d "include/gpu/graphite" ]; then
+          mkdir -p package/graphite/gpu/graphite
+          cp -r include/gpu/graphite/* package/graphite/gpu/graphite/ 2>/dev/null || true
         fi
         
         # 复制third_party中的modules相关文件
@@ -322,19 +330,19 @@ jobs:
         # 根据不同平台复制相应的库文件和可执行文件
         case "${{ matrix.target_os }}" in
           "win")
-            # Windows平台文件复制 - 包含Dawn库
+            # Windows平台文件复制 - 包含Dawn和Graphite库
             find out/Release -name "*.lib" -exec cp {} package/lib/ \; 2>/dev/null || true
             find out/Release -name "*.dll" -exec cp {} package/bin/ \; 2>/dev/null || true
             find out/Release -name "*.exe" -exec cp {} package/bin/ \; 2>/dev/null || true
             ;;
           "mac")
-            # macOS平台文件复制 - 包含Dawn库
+            # macOS平台文件复制 - 包含Dawn和Graphite库
             find out/Release -name "*.a" -exec cp {} package/lib/ \; 2>/dev/null || true
             find out/Release -name "*.dylib" -exec cp {} package/lib/ \; 2>/dev/null || true
             find out/Release -type f -perm +111 -name "*" -not -name "*.so" -not -name "*.dylib" -exec cp {} package/bin/ \; 2>/dev/null || true
             ;;
           "linux")
-            # Linux平台文件复制 - 包含Dawn库
+            # Linux平台文件复制 - 包含Dawn和Graphite库
             find out/Release -name "*.a" -exec cp {} package/lib/ \; 2>/dev/null || true
             find out/Release -name "*.so" -exec cp {} package/lib/ \; 2>/dev/null || true
             find out/Release -type f -perm +111 -name "*" -not -name "*.so" -exec cp {} package/bin/ \; 2>/dev/null || true
@@ -346,18 +354,19 @@ jobs:
           cp -r resources/* package/examples/ 2>/dev/null || true
         fi
         
-        # 创建Dawn WebGPU构建信息文件
+        # 创建Dawn WebGPU和Graphite构建信息文件
         cat > package/BUILD_INFO.txt << EOF
-        Skia Dawn WebGPU 完整构建信息
-        =============================
+        Skia Dawn WebGPU + Graphite 完整构建信息
+        ========================================
         平台: ${{ matrix.target_os }}
         架构: ${{ matrix.target_cpu }}
         包名: ${{ matrix.platform }}
-        构建模式: Release (官方完整构建 + Dawn WebGPU)
-        编译优化: 使用6线程并行编译加速Dawn构建
+        构建模式: Release (官方完整构建 + Dawn WebGPU + Graphite)
+        编译优化: 使用6线程并行编译加速Dawn和Graphite构建
         
         支持的功能:
         - GPU渲染 (OpenGL + Vulkan + Dawn WebGPU)
+        - Graphite 现代渲染架构
         - Dawn WebGPU 现代跨平台GPU API
         - PDF导出 (内置HarfBuzz)
         - SVG支持
@@ -368,11 +377,15 @@ jobs:
         - 颜色管理 (skcms模块)
         
         图形后端:
-        - OpenGL/OpenGL ES
-        - Vulkan
-        - Dawn WebGPU (跨平台统一API)
-        - Metal (仅macOS，通过Dawn)
-        - Direct3D 12 (仅Windows，通过Dawn)
+        - OpenGL/OpenGL ES (传统Ganesh渲染器)
+        - Vulkan (传统Ganesh渲染器)
+        - Dawn WebGPU (通过Graphite渲染器)
+        - Metal (仅macOS，通过Dawn和Graphite)
+        - Direct3D 12 (仅Windows，通过Dawn和Graphite)
+        
+        渲染架构:
+        - Ganesh渲染器 (传统OpenGL/Vulkan)
+        - Graphite渲染器 (现代GPU架构，支持Dawn WebGPU)
         
         Dawn WebGPU后端支持:
         - Windows: Direct3D 12 + Direct3D 11 后端
@@ -389,35 +402,37 @@ jobs:
         特殊说明:
         - 使用内置FreeType和HarfBuzz库以避免系统依赖冲突
         - 所有依赖都已静态链接
-        - Dawn WebGPU提供现代跨平台GPU抽象
+        - Dawn WebGPU通过Graphite渲染器提供现代跨平台GPU抽象
+        - Graphite渲染器为新一代GPU架构设计
         - Windows平台为避免C++17兼容性问题禁用了DNG SDK
         - 为保证构建稳定性已禁用调试工具构建
         - 头文件路径已配置支持源码include格式和模块引用
-        - 包含完整的modules、third_party和Dawn依赖
-        - 使用6线程并行编译加速Dawn构建过程
+        - 包含完整的modules、third_party、Dawn和Graphite依赖
+        - 使用6线程并行编译加速Dawn和Graphite构建过程
         - Dawn WebGPU为未来的跨平台GPU应用提供统一接口
+        - Graphite渲染器提供更现代的GPU资源管理
         EOF
         
       shell: bash
       
-    # 生成Dawn WebGPU专用的CMakeLists.txt文件
-    - name: 生成Dawn WebGPU CMakeLists.txt
+    # 生成Dawn WebGPU和Graphite专用的CMakeLists.txt文件
+    - name: 生成Dawn WebGPU和Graphite CMakeLists.txt
       run: |
         cd skia/package
         
-        # 生成CMakeLists.txt文件，确保正确的包含路径和Dawn WebGPU支持
+        # 生成CMakeLists.txt文件，确保正确的包含路径和Dawn WebGPU + Graphite支持
         cat > CMakeLists.txt << 'EOF'
-        # Skia Dawn WebGPU图形库的CMake配置文件
+        # Skia Dawn WebGPU + Graphite图形库的CMake配置文件
         cmake_minimum_required(VERSION 3.15)
         
         # 设置项目信息
-        project(SkiaDawnPrebuilt
+        project(SkiaDawnGraphitePrebuilt
             VERSION 1.0.0
-            DESCRIPTION "完整预编译的Skia图形库 with Dawn WebGPU后端"
+            DESCRIPTION "完整预编译的Skia图形库 with Dawn WebGPU + Graphite后端"
             LANGUAGES CXX C
         )
         
-        # 设置C++标准（Dawn需要C++17或更高）
+        # 设置C++标准（Dawn和Graphite需要C++17或更高）
         set(CMAKE_CXX_STANDARD 17)
         set(CMAKE_CXX_STANDARD_REQUIRED ON)
         
@@ -428,16 +443,18 @@ jobs:
         add_library(skia INTERFACE)
         add_library(skia::skia ALIAS skia)
         
-        # 设置包含目录 - 包含Dawn WebGPU头文件路径
+        # 设置包含目录 - 包含Dawn WebGPU和Graphite头文件路径
         target_include_directories(skia INTERFACE
             $<BUILD_INTERFACE:${SKIA_ROOT_DIR}>
             $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/modules>
             $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/third_party>
             $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/dawn>
+            $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/graphite>
             $<INSTALL_INTERFACE:.>
             $<INSTALL_INTERFACE:modules>
             $<INSTALL_INTERFACE:third_party>
             $<INSTALL_INTERFACE:dawn>
+            $<INSTALL_INTERFACE:graphite>
         )
         
         # 查找所有的库文件
@@ -445,9 +462,10 @@ jobs:
         
         # 根据平台设置特定的链接库和编译选项
         if(WIN32)
-            # Windows平台配置 - 使用/MD运行时，启用Dawn WebGPU
+            # Windows平台配置 - 使用/MD运行时，启用Dawn WebGPU和Graphite
             target_compile_definitions(skia INTERFACE
                 SK_GANESH=1
+                SK_GRAPHITE=1
                 SK_VULKAN=1
                 SK_GL=1
                 SK_DAWN=1
@@ -493,9 +511,10 @@ jobs:
             )
             
         elseif(APPLE)
-            # macOS平台配置 - 启用Dawn WebGPU Metal后端
+            # macOS平台配置 - 启用Dawn WebGPU Metal后端和Graphite
             target_compile_definitions(skia INTERFACE
                 SK_GANESH=1
+                SK_GRAPHITE=1
                 SK_METAL=1
                 SK_GL=1
                 SK_VULKAN=1
@@ -532,9 +551,10 @@ jobs:
             )
             
         else()
-            # Linux平台配置 - 启用Dawn WebGPU Vulkan后端
+            # Linux平台配置 - 启用Dawn WebGPU Vulkan后端和Graphite
             target_compile_definitions(skia INTERFACE
                 SK_GANESH=1
+                SK_GRAPHITE=1
                 SK_VULKAN=1
                 SK_GL=1
                 SK_DAWN=1
@@ -617,7 +637,7 @@ jobs:
       shell: bash
       
     # 打包Dawn WebGPU构建产物为ZIP文件
-    - name: 打包Dawn WebGPU构建产物
+    - name: 打包Dawn WebGPU和Graphite构建产物
       run: |
         cd skia/package
         
@@ -632,7 +652,7 @@ jobs:
       shell: bash
       
     # 上传Dawn WebGPU构建产物到GitHub Actions
-    - name: 上传Dawn WebGPU构建产物
+    - name: 上传Dawn WebGPU和Graphite构建产物
       uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.platform }}
@@ -668,11 +688,11 @@ jobs:
       id: get_tag
       run: |
         if [ "${{ github.event_name }}" = "schedule" ]; then
-          echo "tag=dawn-daily-$(date +%Y%m%d)" >> $GITHUB_OUTPUT
-          echo "name=Skia Dawn WebGPU 每日构建包 $(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
+          echo "tag=dawn-graphite-daily-$(date +%Y%m%d)" >> $GITHUB_OUTPUT
+          echo "name=Skia Dawn WebGPU + Graphite 每日构建包 $(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
         else
-          echo "tag=skia-dawn-build-${{ github.run_number }}" >> $GITHUB_OUTPUT
-          echo "name=Skia Dawn WebGPU 构建包 v${{ github.run_number }}" >> $GITHUB_OUTPUT
+          echo "tag=skia-dawn-graphite-build-${{ github.run_number }}" >> $GITHUB_OUTPUT
+          echo "name=Skia Dawn WebGPU + Graphite 构建包 v${{ github.run_number }}" >> $GITHUB_OUTPUT
         fi
         
     # 创建GitHub Release发布版本
@@ -682,26 +702,31 @@ jobs:
         tag_name: ${{ steps.get_tag.outputs.tag }}
         name: ${{ steps.get_tag.outputs.name }}
         body: |
-          # Skia Dawn WebGPU 多平台构建包
+          # Skia Dawn WebGPU + Graphite 多平台构建包
           
-          这个发布包包含了启用Dawn WebGPU后端的Skia图形库预编译版本。
+          这个发布包包含了启用Dawn WebGPU后端和Graphite渲染器的Skia图形库预编译版本。
           
           ## 包含的平台
           
-          ### Windows (Dawn WebGPU支持)
+          ### Windows (Dawn WebGPU + Graphite支持)
           - x64_windows_dawn.zip - Windows x64架构
           - arm64_windows_dawn.zip - Windows ARM64架构
-          - 后端支持: Direct3D 12/11 + Vulkan
+          - 后端支持: Direct3D 12/11 + Vulkan (通过Dawn和Graphite)
           
-          ### macOS (Dawn WebGPU支持)  
+          ### macOS (Dawn WebGPU + Graphite支持)  
           - x64_macos_dawn.zip - macOS Intel架构
           - arm64_macos_dawn.zip - macOS Apple Silicon架构
-          - 后端支持: Metal + Vulkan
+          - 后端支持: Metal + Vulkan (通过Dawn和Graphite)
           
-          ### Linux (Dawn WebGPU支持)
+          ### Linux (Dawn WebGPU + Graphite支持)
           - x64_linux_dawn.zip - Linux x64架构
           - arm64_linux_dawn.zip - Linux ARM64架构
-          - 后端支持: Vulkan + OpenGL
+          - 后端支持: Vulkan + OpenGL (通过Dawn和Graphite)
+          
+          ## 渲染架构
+          
+          - **Ganesh渲染器** - 传统OpenGL/Vulkan支持
+          - **Graphite渲染器** - 现代GPU架构，支持Dawn WebGPU
           
           ## CMake使用方法
           
@@ -713,6 +738,7 @@ jobs:
           ## 主要特性
           
           - Dawn WebGPU跨平台GPU API支持
+          - Graphite现代渲染架构
           - 完整的Skia核心功能
           - PDF/SVG/动画支持
           - 内置字体和文本处理
