@@ -160,7 +160,7 @@ jobs:
       run: |
         cd skia
         
-        # 基础构建参数设置 - 启用全量功能，使用C++20标准
+        # 基础构建参数设置 - 启用全量功能
         args="is_official_build=true"
         args="$args skia_use_system_expat=false"
         args="$args skia_use_system_icu=false"
@@ -168,9 +168,6 @@ jobs:
         args="$args skia_use_system_libpng=false"
         args="$args skia_use_system_libwebp=false"
         args="$args skia_use_system_zlib=false"
-        
-        # 设置C++20标准
-        args="$args extra_cflags_cc=[\"-std=c++2a\"]"
         
         # 启用全量功能支持，但使用内置依赖库
         args="$args skia_enable_pdf=true"
@@ -197,10 +194,10 @@ jobs:
         args="$args target_os=\"${{ matrix.target_os }}\""
         args="$args target_cpu=\"${{ matrix.target_cpu }}\""
         
-        # 根据不同平台设置特定参数
+        # 根据不同平台设置特定参数和编译选项
         case "${{ matrix.target_os }}" in
           "win")
-            # Windows平台特定配置 - 使用/MD运行时
+            # Windows平台特定配置 - 使用/MD运行时和C++20标准
             args="$args skia_use_angle=true"
             args="$args skia_use_direct3d=true"
             args="$args skia_use_freetype=true"
@@ -209,7 +206,7 @@ jobs:
             args="$args skia_use_system_harfbuzz=false"
             args="$args skia_use_dng_sdk=false"
             args="$args skia_use_piex=false"
-            # 设置Windows使用/MD运行时（多线程DLL）
+            # 设置Windows使用/MD运行时和C++20标准（统一设置避免重复）
             args="$args extra_cflags=[\"/MD\", \"/std:c++20\"]"
             args="$args extra_cflags_c=[\"/MD\"]"
             args="$args extra_cflags_cc=[\"/MD\", \"/std:c++20\"]"
@@ -226,11 +223,8 @@ jobs:
             args="$args skia_pdf_subset_harfbuzz=true"
             args="$args skia_use_dng_sdk=true"
             args="$args skia_use_piex=true"
-            # 设置C++20标准
+            # 设置C++20标准（统一设置避免重复）
             args="$args extra_cflags_cc=[\"-std=c++20\"]"
-            if [ "${{ matrix.target_cpu }}" = "arm64" ]; then
-              args="$args target_cpu=\"arm64\""
-            fi
             ;;
           "linux")
             # Linux平台特定配置
@@ -242,7 +236,7 @@ jobs:
             args="$args skia_use_piex=true"
             args="$args skia_use_system_freetype2=true"
             args="$args skia_use_system_harfbuzz=true"
-            # 设置C++20标准
+            # 设置C++20标准（统一设置避免重复）
             args="$args extra_cflags_cc=[\"-std=c++20\"]"
             ;;
           "android")
@@ -257,7 +251,7 @@ jobs:
             args="$args skia_use_system_harfbuzz=false"
             args="$args skia_use_dng_sdk=true"
             args="$args skia_use_piex=true"
-            # 设置C++20标准
+            # 设置C++20标准（统一设置避免重复）
             args="$args extra_cflags_cc=[\"-std=c++20\"]"
             ;;
         esac
@@ -310,7 +304,7 @@ jobs:
         dawn_args="$dawn_args target_os=\"${{ matrix.target_os }}\""
         dawn_args="$dawn_args target_cpu=\"${{ matrix.target_cpu }}\""
         
-        # 设置C++20标准
+        # 根据平台设置C++20标准
         case "${{ matrix.target_os }}" in
           "win")
             dawn_args="$dawn_args extra_cflags=[\"/std:c++20\", \"/MD\"]"
@@ -383,7 +377,7 @@ jobs:
             ;;
         esac
         
-        # 复制Dawn库文件
+        # 复制Dawn库文件到对应平台目录
         case "${{ matrix.target_os }}" in
           "win")
             find ../dawn/out/Release -name "*.lib" -exec cp {} Skia/lib/${{ matrix.target_os }}/${{ matrix.target_cpu }}/ \; 2>/dev/null || true
