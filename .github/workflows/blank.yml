@@ -83,35 +83,33 @@ jobs:
     - name: 安装Linux系统依赖
       if: runner.os == 'Linux'
       run: |
-        sudo apt-get update
-        
-        # 安装基础构建工具
-        sudo apt-get install -y build-essential ninja-build
-        
-        # 检查Ubuntu版本
-        echo "=== 检查系统版本 ==="
-        lsb_release -a
-        
-        # 安装基础编译器和开发工具（使用系统默认版本）
-        sudo apt-get install -y gcc g++ clang clang++ libc++-dev libc++abi-dev
-        
-        # 安装图形和字体相关依赖
-        sudo apt-get install -y libfontconfig1-dev libfreetype6-dev libgl1-mesa-dev
-        
-        # 安装Vulkan开发库
-        sudo apt-get install -y libvulkan-dev vulkan-tools
-        
-        # 安装X11相关库
-        sudo apt-get install -y libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
-        
-        # 安装ICU和HarfBuzz
-        sudo apt-get install -y libicu-dev libharfbuzz-dev
-        
-        # 安装pkg-config工具
-        sudo apt-get install -y pkg-config
-        
-        # 安装Java开发环境（Android构建需要）
-        sudo apt-get install -y openjdk-11-jdk
+# 更新包列表
+sudo apt-get update
+
+# 安装基础构建工具
+sudo apt-get install -y build-essential ninja-build pkg-config
+
+# 安装 GCC (通常作为 build-essential 的一部分被安装)
+sudo apt-get install -y gcc g++
+
+# ----------------- 【关键修改在这里】 -----------------
+# 明确安装 Clang 18 和其对应的 C++ 标准库开发文件
+sudo apt-get install -y clang-18 clang++-18 libc++-18-dev libc++abi-18-dev
+
+# 安装图形和字体相关依赖
+sudo apt-get install -y libfontconfig1-dev libfreetype6-dev libgl1-mesa-dev
+
+# 安装Vulkan开发库
+sudo apt-get install -y libvulkan-dev vulkan-tools
+
+# 安装X11相关库
+sudo apt-get install -y libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+
+# 安装ICU和HarfBuzz
+sudo apt-get install -y libicu-dev libharfbuzz-dev
+
+# 安装Java开发环境（如果需要）
+sudo apt-get install -y openjdk-11-jdk
         
         # 显示编译器版本信息
         echo "=== 编译器版本信息 ==="
