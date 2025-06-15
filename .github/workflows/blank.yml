@@ -84,25 +84,53 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        # 安装基础构建工具和更新的编译器
+        # 安装基础构建工具
         sudo apt-get install -y build-essential ninja-build
-        # 安装更新的GCC和Clang支持C++20
-        sudo apt-get install -y gcc-11 g++-11 clang-12
-        # 设置默认编译器为支持C++20的版本
-        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 60
-        sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 60
-        sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-12 60
-        sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-12 60
+        
+        # 检查Ubuntu版本并安装最新的编译器
+        echo "=== 检查系统版本 ==="
+        lsb_release -a
+        
+        # 安装最新的GCC和Clang（Ubuntu 24.04默认版本已经支持C++20）
+        sudo apt-get install -y gcc g++ clang clang++ libc++-dev libc++abi-dev
+        
+        # 尝试安装更新版本的clang（如果可用）
+        echo "=== 尝试安装更新版本的clang ==="
+        # 添加LLVM官方仓库获取最新clang
+        wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add - || true
+        sudo add-apt-repository "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-18 main" -y || true
+        sudo apt-get update || true
+        sudo apt-get install -y clang-18 clang++-18 libc++-18-dev libc++abi-18-dev || echo "使用系统默认clang版本"
+        
         # 安装图形和字体相关依赖
         sudo apt-get install -y libfontconfig1-dev libfreetype6-dev libgl1-mesa-dev
         # 安装Vulkan开发库
-        sudo apt-get install -y libvulkan-dev vulkan-tools
+        sudo apt-get install -y libvulkan-dev vulkan-tools vulkan-validationlayers-dev
         # 安装X11相关库
         sudo apt-get install -y libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
         # 安装ICU和HarfBuzz
         sudo apt-get install -y libicu-dev libharfbuzz-dev
+        # 安装pkg-config工具
+        sudo apt-get install -y pkg-config
         # 安装Java开发环境（Android构建需要）
         sudo apt-get install -y openjdk-11-jdk
+        
+        # 设置编译器符号链接，优先使用最新版本
+        if command -v clang-18 &> /dev/null; then
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-18 100
+          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-18 100
+          echo "使用 clang-18"
+        else
+          echo "使用系统默认 clang"
+        fi
+        
+        # 显示编译器版本信息
+        echo "=== 编译器版本信息 ==="
+        gcc --version
+        g++ --version
+        clang --version
+        clang++ --version
+        echo "======================"
         
     # 安装macOS系统依赖
     - name: 安装macOS系统依赖
@@ -116,6 +144,9 @@ jobs:
         xcodebuild -version
         # 检查clang版本
         clang --version
+        echo "=== macOS编译器版本信息 ==="
+        clang --version
+        echo "========================="
         
     # 安装Windows系统依赖
     - name: 安装Windows系统依赖
@@ -247,8 +278,9 @@ jobs:
             args="$args skia_use_system_freetype2=true"
             args="$args skia_use_system_harfbuzz=true"
             # 设置C++20标准和编译器选项（修复Linux编译问题）
-            args="$args extra_cflags_cc=[\"-std=c++20\", \"-stdlib=libstdc++\"]"
-            args="$args extra_ldflags=[\"-stdlib=libstdc++\"]"
+            # 使用libc++以获得更好的C++20支持
+            args="$args extra_cflags_cc=[\"-std=c++20\", \"-stdlib=libc++\"]"
+            args="$args extra_ldflags=[\"-stdlib=libc++\", \"-lc++abi\"]"
             # 强制使用支持C++20的编译器
             args="$args cc=\"clang\""
             args="$args cxx=\"clang++\""
@@ -330,9 +362,9 @@ jobs:
             dawn_args="$dawn_args extra_ldflags=[\"-stdlib=libc++\", \"-mmacosx-version-min=10.15\"]"
             ;;
           "linux")
-            # Linux平台使用libstdc++和C++20
-            dawn_args="$dawn_args extra_cflags_cc=[\"-std=c++20\", \"-stdlib=libstdc++\"]"
-            dawn_args="$dawn_args extra_ldflags=[\"-stdlib=libstdc++\"]"
+            # Linux平台使用libc++和C++20
+            dawn_args="$dawn_args extra_cflags_cc=[\"-std=c++20\", \"-stdlib=libc++\"]"
+            dawn_args="$dawn_args extra_ldflags=[\"-stdlib=libc++\", \"-lc++abi\"]"
             # 强制使用支持C++20的编译器
             dawn_args="$dawn_args cc=\"clang\""
             dawn_args="$dawn_args cxx=\"clang++\""
@@ -460,10 +492,10 @@ jobs:
         - Direct3D (仅Windows)
         
         编译器配置:
-        - Windows: MSVC with /MD runtime
-        - macOS: Clang with libc++
-        - Linux: Clang with libstdc++
-        - Android: NDK Clang
+        - Windows: MSVC 2022 with /MD runtime
+        - macOS: 最新 Clang with libc++
+        - Linux: 最新 Clang with libc++
+        - Android: NDK 最新 Clang
         EOF
         
       shell: bash
@@ -706,7 +738,7 @@ jobs:
             # 设置C++20标准
             target_compile_options(skdn INTERFACE
                 -std=c++20
-                -stdlib=libstdc++
+                -stdlib=libc++
             )
             
             # 查找必要的系统库
@@ -726,6 +758,9 @@ jobs:
                 ${SKDN_LIBRARIES}
                 # OpenGL
                 GL
+                # libc++相关库
+                c++
+                c++abi
                 # 系统库
                 pthread
                 dl
@@ -868,26 +903,26 @@ jobs:
           ### 桌面平台
           - **Skia_Prebuilt_x64_windows.zip** - Windows x64架构
             - GPU后端: Direct3D + OpenGL + Vulkan + WebGPU
-            - 运行时: /MD (多线程DLL)
+            - 编译器: MSVC 2022 with /MD runtime
             - C++标准: C++20
           
           - **Skia_Prebuilt_x64_macos.zip** - macOS Intel x64架构
           - **Skia_Prebuilt_arm64_macos.zip** - macOS Apple Silicon ARM64架构
             - GPU后端: Metal + OpenGL + Vulkan + WebGPU
-            - 完整DNG RAW支持
-            - C++标准: C++20 (libc++)
+            - 编译器: 最新 Clang with libc++
+            - C++标准: C++20
           
           - **Skia_Prebuilt_x64_linux.zip** - Linux x64架构
             - GPU后端: OpenGL + Vulkan + WebGPU
-            - X11完整支持
-            - C++标准: C++20 (libstdc++)
+            - 编译器: 最新 Clang with libc++
+            - C++标准: C++20
           
           ### 移动平台
           - **Skia_Prebuilt_x64_android.zip** - Android x64架构
           - **Skia_Prebuilt_arm64_android.zip** - Android ARM64架构
             - GPU后端: OpenGL ES + Vulkan + WebGPU
+            - 编译器: NDK 最新 Clang
             - Android API级别: 21+
-            - NDK版本: r25c
             - C++标准: C++20
           
           ## CMake使用方法
@@ -919,12 +954,12 @@ jobs:
           - ✅ **全平台支持**
           - ✅ **生产环境就绪**
           
-          ## 修复内容
+          ## 最新修复
           
-          - ✅ **修复macOS编译问题**: 使用libc++和正确的最低版本要求
-          - ✅ **修复Linux编译问题**: 使用libstdc++和支持C++20的Clang编译器
-          - ✅ **统一编译器配置**: 确保所有平台都使用C++20标准
-          - ✅ **优化依赖管理**: 正确处理不同平台的标准库依赖
+          - ✅ **修复Linux编译器安装**: 添加LLVM官方仓库获取最新Clang版本
+          - ✅ **优化编译器版本检测**: 自动选择最佳的编译器版本
+          - ✅ **统一标准库配置**: 确保所有平台使用正确的C++标准库
+          - ✅ **改进错误处理**: 增强构建过程的容错性
         files: |
           artifacts/*/**.zip
         draft: false
