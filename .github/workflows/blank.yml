@@ -84,45 +84,34 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
+        
         # 安装基础构建工具
         sudo apt-get install -y build-essential ninja-build
         
-        # 检查Ubuntu版本并安装最新的编译器
+        # 检查Ubuntu版本
         echo "=== 检查系统版本 ==="
         lsb_release -a
         
-        # 安装最新的GCC和Clang（Ubuntu 24.04默认版本已经支持C++20）
+        # 安装基础编译器和开发工具（使用系统默认版本）
         sudo apt-get install -y gcc g++ clang clang++ libc++-dev libc++abi-dev
-        
-        # 尝试安装更新版本的clang（如果可用）
-        echo "=== 尝试安装更新版本的clang ==="
-        # 添加LLVM官方仓库获取最新clang
-        wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add - || true
-        sudo add-apt-repository "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-18 main" -y || true
-        sudo apt-get update || true
-        sudo apt-get install -y clang-18 clang++-18 libc++-18-dev libc++abi-18-dev || echo "使用系统默认clang版本"
         
         # 安装图形和字体相关依赖
         sudo apt-get install -y libfontconfig1-dev libfreetype6-dev libgl1-mesa-dev
+        
         # 安装Vulkan开发库
-        sudo apt-get install -y libvulkan-dev vulkan-tools vulkan-validationlayers-dev
+        sudo apt-get install -y libvulkan-dev vulkan-tools
+        
         # 安装X11相关库
         sudo apt-get install -y libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+        
         # 安装ICU和HarfBuzz
         sudo apt-get install -y libicu-dev libharfbuzz-dev
+        
         # 安装pkg-config工具
         sudo apt-get install -y pkg-config
+        
         # 安装Java开发环境（Android构建需要）
         sudo apt-get install -y openjdk-11-jdk
-        
-        # 设置编译器符号链接，优先使用最新版本
-        if command -v clang-18 &> /dev/null; then
-          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-18 100
-          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-18 100
-          echo "使用 clang-18"
-        else
-          echo "使用系统默认 clang"
-        fi
         
         # 显示编译器版本信息
         echo "=== 编译器版本信息 ==="
@@ -143,7 +132,6 @@ jobs:
         # 验证Xcode版本并确保支持C++20
         xcodebuild -version
         # 检查clang版本
-        clang --version
         echo "=== macOS编译器版本信息 ==="
         clang --version
         echo "========================="
@@ -237,7 +225,7 @@ jobs:
         # 根据不同平台设置特定参数和编译选项
         case "${{ matrix.target_os }}" in
           "win")
-            # Windows平台特定配置 - 使用/MD运行时和C++20标准
+            # Windows平台特定配置 - 使用MSVC 2022和C++20标准
             args="$args skia_use_angle=true"
             args="$args skia_use_direct3d=true"
             args="$args skia_use_freetype=true"
@@ -252,7 +240,7 @@ jobs:
             args="$args extra_cflags_cc=[\"/MD\", \"/std:c++20\"]"
             ;;
           "mac")
-            # macOS平台特定配置 - 使用内置库避免系统库冲突
+            # macOS平台特定配置 - 使用最新Clang和C++20标准
             args="$args skia_use_metal=true"
             args="$args skia_enable_skottie=true"
             args="$args skia_use_freetype=true"
@@ -263,12 +251,12 @@ jobs:
             args="$args skia_pdf_subset_harfbuzz=true"
             args="$args skia_use_dng_sdk=true"
             args="$args skia_use_piex=true"
-            # 设置C++20标准和兼容性选项（修复macOS编译问题）
+            # 设置C++20标准和兼容性选项
             args="$args extra_cflags_cc=[\"-std=c++20\", \"-stdlib=libc++\", \"-mmacosx-version-min=10.15\"]"
             args="$args extra_ldflags=[\"-stdlib=libc++\", \"-mmacosx-version-min=10.15\"]"
             ;;
           "linux")
-            # Linux平台特定配置
+            # Linux平台特定配置 - 使用系统默认Clang和C++20标准
             args="$args skia_use_x11=true"
             args="$args skia_use_freetype=true"
             args="$args skia_use_fontconfig=true"
@@ -277,16 +265,15 @@ jobs:
             args="$args skia_use_piex=true"
             args="$args skia_use_system_freetype2=true"
             args="$args skia_use_system_harfbuzz=true"
-            # 设置C++20标准和编译器选项（修复Linux编译问题）
-            # 使用libc++以获得更好的C++20支持
+            # 设置C++20标准和编译器选项（使用libc++获得更好的C++20支持）
             args="$args extra_cflags_cc=[\"-std=c++20\", \"-stdlib=libc++\"]"
             args="$args extra_ldflags=[\"-stdlib=libc++\", \"-lc++abi\"]"
-            # 强制使用支持C++20的编译器
+            # 使用clang编译器（Ubuntu 24.04默认版本支持C++20）
             args="$args cc=\"clang\""
             args="$args cxx=\"clang++\""
             ;;
           "android")
-            # Android平台特定配置
+            # Android平台特定配置 - 使用NDK最新Clang和C++20标准
             args="$args ndk=\"$ANDROID_NDK_ROOT\""
             args="$args android_api_level=${{ matrix.android_api }}"
             args="$args skia_use_system_freetype2=false"
@@ -297,7 +284,7 @@ jobs:
             args="$args skia_use_system_harfbuzz=false"
             args="$args skia_use_dng_sdk=true"
             args="$args skia_use_piex=true"
-            # 设置C++20标准（Android NDK支持C++20）
+            # 设置C++20标准（Android NDK r25c支持C++20）
             args="$args extra_cflags_cc=[\"-std=c++20\"]"
             ;;
         esac
@@ -353,23 +340,25 @@ jobs:
         # 根据平台设置C++20标准和编译器选项
         case "${{ matrix.target_os }}" in
           "win")
+            # Windows平台使用MSVC 2022和C++20
             dawn_args="$dawn_args extra_cflags=[\"/std:c++20\", \"/MD\"]"
             dawn_args="$dawn_args extra_cflags_cc=[\"/std:c++20\", \"/MD\"]"
             ;;
           "mac")
-            # macOS平台使用libc++和C++20
+            # macOS平台使用最新Clang和libc++
             dawn_args="$dawn_args extra_cflags_cc=[\"-std=c++20\", \"-stdlib=libc++\", \"-mmacosx-version-min=10.15\"]"
             dawn_args="$dawn_args extra_ldflags=[\"-stdlib=libc++\", \"-mmacosx-version-min=10.15\"]"
             ;;
           "linux")
-            # Linux平台使用libc++和C++20
+            # Linux平台使用系统默认Clang和libc++
             dawn_args="$dawn_args extra_cflags_cc=[\"-std=c++20\", \"-stdlib=libc++\"]"
             dawn_args="$dawn_args extra_ldflags=[\"-stdlib=libc++\", \"-lc++abi\"]"
-            # 强制使用支持C++20的编译器
+            # 使用clang编译器
             dawn_args="$dawn_args cc=\"clang\""
             dawn_args="$dawn_args cxx=\"clang++\""
             ;;
           "android")
+            # Android平台使用NDK最新Clang
             dawn_args="$dawn_args extra_cflags_cc=[\"-std=c++20\"]"
             dawn_args="$dawn_args ndk=\"$ANDROID_NDK_ROOT\""
             dawn_args="$dawn_args android_api_level=${{ matrix.android_api }}"
@@ -494,8 +483,8 @@ jobs:
         编译器配置:
         - Windows: MSVC 2022 with /MD runtime
         - macOS: 最新 Clang with libc++
-        - Linux: 最新 Clang with libc++
-        - Android: NDK 最新 Clang
+        - Linux: 系统默认 Clang with libc++
+        - Android: NDK r25c Clang
         EOF
         
       shell: bash
@@ -914,14 +903,14 @@ jobs:
           
           - **Skia_Prebuilt_x64_linux.zip** - Linux x64架构
             - GPU后端: OpenGL + Vulkan + WebGPU
-            - 编译器: 最新 Clang with libc++
+            - 编译器: 系统默认 Clang with libc++
             - C++标准: C++20
           
           ### 移动平台
           - **Skia_Prebuilt_x64_android.zip** - Android x64架构
           - **Skia_Prebuilt_arm64_android.zip** - Android ARM64架构
             - GPU后端: OpenGL ES + Vulkan + WebGPU
-            - 编译器: NDK 最新 Clang
+            - 编译器: NDK r25c Clang
             - Android API级别: 21+
             - C++标准: C++20
           
@@ -954,12 +943,12 @@ jobs:
           - ✅ **全平台支持**
           - ✅ **生产环境就绪**
           
-          ## 最新修复
+          ## 修复内容
           
-          - ✅ **修复Linux编译器安装**: 添加LLVM官方仓库获取最新Clang版本
-          - ✅ **优化编译器版本检测**: 自动选择最佳的编译器版本
-          - ✅ **统一标准库配置**: 确保所有平台使用正确的C++标准库
-          - ✅ **改进错误处理**: 增强构建过程的容错性
+          - ✅ **修复Ubuntu 24.04包冲突**: 移除复杂的包安装，使用系统默认编译器
+          - ✅ **简化依赖管理**: 避免包版本冲突问题
+          - ✅ **优化构建策略**: 使用稳定的系统默认工具链
+          - ✅ **确保兼容性**: 所有平台都使用经过验证的编译器版本
         files: |
           artifacts/*/**.zip
         draft: false
