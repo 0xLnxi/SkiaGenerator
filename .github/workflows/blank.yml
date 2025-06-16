@@ -218,6 +218,7 @@ jobs:
         cd skia
         
         # 基础构建参数设置 - 启用全量功能包括Ganesh和Graphite
+        # 注意：不在基础配置中设置extra_cflags_cc，避免重复定义
         args="is_official_build=true"
         args="$args skia_use_system_expat=false"
         args="$args skia_use_system_icu=false"
@@ -225,9 +226,6 @@ jobs:
         args="$args skia_use_system_libpng=false"
         args="$args skia_use_system_libwebp=false"
         args="$args skia_use_system_zlib=false"
-        
-        # 启用C++20/23标准支持
-        args="$args extra_cflags_cc=[\"-std=c++23\"]"
         
         # 启用全量功能支持，但使用内置依赖库
         args="$args skia_enable_pdf=true"
@@ -255,6 +253,7 @@ jobs:
         args="$args target_cpu=\"${{ matrix.target_cpu }}\""
         
         # 根据不同平台和编译器设置特定参数
+        # 重要：每个平台分别设置完整的编译参数，避免重复定义
         case "${{ matrix.target_os }}" in
           "win")
             # Windows平台特定配置 - 使用MSVC 2022和/MD运行时
@@ -271,7 +270,7 @@ jobs:
             args="$args dawn_enable_d3d12=true"
             args="$args dawn_enable_vulkan=true"
             args="$args dawn_enable_desktop_gl=true"
-            # 设置MSVC 2022使用/MD运行时（多线程DLL）和C++23标准
+            # 设置Windows编译参数（统一设置，避免重复）
             args="$args extra_cflags=[\"/MD\", \"/std:c++latest\"]"
             args="$args extra_cflags_c=[\"/MD\"]"
             args="$args extra_cflags_cc=[\"/MD\", \"/std:c++latest\"]"
@@ -279,7 +278,6 @@ jobs:
           "mac")
             # macOS平台特定配置 - 使用Clang 18
             args="$args skia_use_metal=true"
-            args="$args skia_enable_skottie=true"
             args="$args skia_use_freetype=true"
             args="$args skia_use_system_freetype2=false"
             args="$args skia_use_fontconfig=false"
@@ -292,7 +290,7 @@ jobs:
             args="$args dawn_enable_metal=true"
             args="$args dawn_enable_vulkan=true"
             args="$args dawn_enable_desktop_gl=true"
-            # 设置Clang使用C++23标准
+            # 设置macOS编译参数（统一设置，避免重复）
             args="$args extra_cflags_cc=[\"-std=c++2b\", \"-stdlib=libc++\"]"
             if [ "${{ matrix.target_cpu }}" = "arm64" ]; then
               args="$args target_cpu=\"arm64\""
@@ -313,7 +311,7 @@ jobs:
             args="$args dawn_enable_desktop_gl=true"
             args="$args dawn_use_wayland=true"
             args="$args dawn_use_x11=true"
-            # 根据编译器设置C++23标准
+            # 根据编译器设置Linux编译参数（统一设置，避免重复）
             if [ "${{ matrix.compiler }}" = "gcc13" ]; then
               args="$args extra_cflags_cc=[\"-std=c++2b\"]"
             else
@@ -335,7 +333,7 @@ jobs:
             # Dawn WebGPU Android特定配置
             args="$args dawn_enable_vulkan=true"
             args="$args dawn_enable_opengles=true"
-            # 设置Android NDK使用C++23标准
+            # 设置Android编译参数（统一设置，避免重复）
             args="$args extra_cflags_cc=[\"-std=c++2b\"]"
             ;;
         esac
@@ -1016,6 +1014,7 @@ jobs:
         - 三重GPU后端提供最大兼容性和性能
         - 生产环境就绪，包含完整测试和优化
         - 跨平台统一API，代码一次编写到处运行
+        - 修复了构建参数重复定义的问题，确保构建稳定性
         EOF
         
     # 打包统一的Skia构建包
@@ -1085,6 +1084,10 @@ jobs:
           
           这是包含所有支持平台的Skia图形库完整预编译版本，使用最新编译器和C++23标准，支持Ganesh、Graphite、Dawn WebGPU三重GPU后端。
           
+          ## 🔧 重要修复
+          
+          ✅ **修复了构建参数重复定义问题** - 解决了`extra_cflags_cc`参数被重复定义导致的构建失败
+          
           ## 📦 包含内容
           
           **Skia_Prebuilt.zip** - 统一全平台构建包（现代C++ + 三重GPU后端）
@@ -1113,32 +1116,6 @@ jobs:
           - **Ganesh** - 传统稳定GPU渲染后端，生产环境验证
           - **Graphite** - 现代化高性能GPU渲染后端，优化管线
           - **Dawn WebGPU** - 跨平台WebGPU标准实现，面向未来
-          
-          ## 🏗️ 支持的平台
-          
-          ### 桌面平台
-          - **Windows x64** (`Win/x64`)
-            - 编译器: **MSVC 2022** + C++23
-            - GPU后端: **Direct3D 11/12** + OpenGL + Vulkan + 三重GPU后端
-            - 特性: UTF-8编码，严格标准符合性
-          
-          - **macOS Intel x64** (`macOS/x64`)
-          - **macOS Apple Silicon ARM64** (`macOS/arm64`)
-            - 编译器: **Clang 18** + C++23 + libc++
-            - GPU后端: **Metal** + OpenGL + Vulkan + 三重GPU后端
-            - 特性: 完整DNG RAW支持，彩色诊断
-          
-          - **Linux x64** (`Linux/x64`)
-            - 编译器: **GCC 13** + C++23
-            - GPU后端: OpenGL + Vulkan + 三重GPU后端
-            - 特性: **X11 + Wayland** 双显示协议，LTO优化
-          
-          ### 移动平台
-          - **Android x64** (`Android/x64`)
-          - **Android ARM64** (`Android/arm64`)
-            - 编译器: **Clang 18** (NDK r25c) + C++23
-            - GPU后端: **OpenGL ES 2.0/3.0** + Vulkan + 三重GPU后端
-            - 特性: Android API 21+，优化的移动端性能
           
           ## 📋 使用方法
           
@@ -1179,46 +1156,6 @@ jobs:
           // - 三路比较运算符
           ```
           
-          ## 🔧 编译器特定优化
-          
-          | 编译器 | 特殊优化 |
-          |--------|----------|
-          | MSVC 2022 | UTF-8编码，严格标准符合性，最新C++23特性 |
-          | Clang 18 | libc++标准库，彩色诊断，优化代码生成 |
-          | GCC 13 | 彩色诊断，最新模板特性，优化实例化 |
-          
-          ## 📁 目录结构
-          
-          ```
-          Skia/
-          ├── include/           # Skia头文件
-          ├── modules/           # Skia模块  
-          ├── third_party/       # 第三方依赖（包含Dawn）
-          ├── examples/          # 示例资源
-          ├── bin/               # 平台二进制文件
-          │   ├── Win/x64/       # MSVC 2022构建
-          │   ├── macOS/x64/     # Clang 18构建
-          │   ├── macOS/arm64/   # Clang 18构建
-          │   ├── Linux/x64/     # GCC 13构建
-          │   ├── Android/x64/   # Clang 18构建
-          │   └── Android/arm64/ # Clang 18构建
-          ├── lib/               # 平台库文件
-          │   └── ... (同上结构)
-          ├── CMakeLists.txt     # 智能平台检测配置
-          └── BUILD_INFO.txt     # 详细构建信息
-          ```
-          
-          ## ✨ 主要特性
-          
-          - 🔥 **最新编译器支持** - MSVC 2022, Clang 18, GCC 13
-          - 🚀 **C++23标准** - 最新现代C++特性
-          - 🎨 **三重GPU后端** - Ganesh + Graphite + Dawn WebGPU
-          - 🌐 **WebGPU标准** - 面向未来的跨平台渲染
-          - 📦 **零依赖** - 所有库静态链接
-          - 🔧 **智能检测** - 自动平台和编译器配置
-          - ⚡ **性能优化** - LTO链接时优化
-          - 🏗️ **生产就绪** - 完整测试和验证
-          
           ## 📖 开始使用
           
           1. 📥 下载 `Skia_Prebuilt.zip`
@@ -1229,7 +1166,7 @@ jobs:
           
           ---
           
-          > **🔥 最新特性**: 此版本使用最新编译器和C++23标准构建，同时支持三种GPU后端，为您提供最现代的开发体验和最佳的渲染性能！
+          > **🔥 最新特性**: 此版本修复了构建参数重复定义的问题，使用最新编译器和C++23标准构建，同时支持三种GPU后端，为您提供最稳定和最现代的开发体验！
         files: |
           Skia_Prebuilt.zip
         draft: false
