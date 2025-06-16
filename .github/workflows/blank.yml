@@ -317,46 +317,26 @@ jobs:
       run: |
         cd skia
         
-        # 创建平台特定目录结构
-        mkdir -p artifacts/${{ matrix.platform }}/${{ matrix.arch }}/lib
-        mkdir -p artifacts/${{ matrix.platform }}/${{ matrix.arch }}/bin
-        mkdir -p artifacts/${{ matrix.platform }}/${{ matrix.arch }}/include/skia
-        mkdir -p artifacts/${{ matrix.platform }}/${{ matrix.arch }}/include/dawn
+        # 创建新的目录结构：bin/平台/架构 和 lib/平台/架构
+        mkdir -p artifacts/bin/${{ matrix.platform }}/${{ matrix.arch }}
+        mkdir -p artifacts/lib/${{ matrix.platform }}/${{ matrix.arch }}
         
-        # 复制Skia头文件
-        echo "复制Skia头文件..."
-        cp -r include/* artifacts/${{ matrix.platform }}/${{ matrix.arch }}/include/skia/
-        
-        # 复制Dawn WebGPU头文件
-        echo "复制Dawn WebGPU头文件..."
-        if [ -d "third_party/externals/dawn/include" ]; then
-          cp -r third_party/externals/dawn/include/* artifacts/${{ matrix.platform }}/${{ matrix.arch }}/include/dawn/
-        fi
-        
-        # 复制生成的Dawn头文件
-        if [ -d "out/Release/gen/third_party/externals/dawn/include" ]; then
-          cp -r out/Release/gen/third_party/externals/dawn/include/* artifacts/${{ matrix.platform }}/${{ matrix.arch }}/include/dawn/
-        fi
-        
-        # 复制modules目录
-        if [ -d "modules" ]; then
-          mkdir -p artifacts/${{ matrix.platform }}/${{ matrix.arch }}/include/modules
-          cp -r modules/* artifacts/${{ matrix.platform }}/${{ matrix.arch }}/include/modules/
-        fi
+        # 如果是第一个构建任务，创建共享头文件目录
+        mkdir -p artifacts/include
         
         # 根据不同平台复制相应的库文件和可执行文件
         case "${{ matrix.target_os }}" in
           "win")
             # Windows平台文件复制
-            find out/Release -name "*.lib" -exec cp {} artifacts/${{ matrix.platform }}/${{ matrix.arch }}/lib/ \; 2>/dev/null || true
-            find out/Release -name "*.dll" -exec cp {} artifacts/${{ matrix.platform }}/${{ matrix.arch }}/bin/ \; 2>/dev/null || true
-            find out/Release -name "*.exe" -exec cp {} artifacts/${{ matrix.platform }}/${{ matrix.arch }}/bin/ \; 2>/dev/null || true
+            find out/Release -name "*.lib" -exec cp {} artifacts/lib/${{ matrix.platform }}/${{ matrix.arch }}/ \; 2>/dev/null || true
+            find out/Release -name "*.dll" -exec cp {} artifacts/bin/${{ matrix.platform }}/${{ matrix.arch }}/ \; 2>/dev/null || true
+            find out/Release -name "*.exe" -exec cp {} artifacts/bin/${{ matrix.platform }}/${{ matrix.arch }}/ \; 2>/dev/null || true
             ;;
           "linux"|"android")
             # Linux和Android平台文件复制
-            find out/Release -name "*.a" -exec cp {} artifacts/${{ matrix.platform }}/${{ matrix.arch }}/lib/ \; 2>/dev/null || true
-            find out/Release -name "*.so" -exec cp {} artifacts/${{ matrix.platform }}/${{ matrix.arch }}/lib/ \; 2>/dev/null || true
-            find out/Release -type f -perm +111 -name "*" -not -name "*.so" -exec cp {} artifacts/${{ matrix.platform }}/${{ matrix.arch }}/bin/ \; 2>/dev/null || true
+            find out/Release -name "*.a" -exec cp {} artifacts/lib/${{ matrix.platform }}/${{ matrix.arch }}/ \; 2>/dev/null || true
+            find out/Release -name "*.so" -exec cp {} artifacts/lib/${{ matrix.platform }}/${{ matrix.arch }}/ \; 2>/dev/null || true
+            find out/Release -type f -perm +111 -name "*" -not -name "*.so" -exec cp {} artifacts/bin/${{ matrix.platform }}/${{ matrix.arch }}/ \; 2>/dev/null || true
             ;;
         esac
         
@@ -371,9 +351,73 @@ jobs:
         path: skia/artifacts/
         retention-days: 30
 
+  # 收集共享头文件（只需要执行一次）
+  collect-headers:
+    runs-on: ubuntu-latest
+    
+    steps:
+    # 检出代码仓库
+    - name: 检出代码仓库
+      uses: actions/checkout@v4
+      
+    # 设置Python环境
+    - name: 设置Python环境
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
+        
+    # 获取depot_tools工具集
+    - name: 获取depot_tools
+      run: |
+        git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+        echo "${{ github.workspace }}/depot_tools" >> $GITHUB_PATH
+        
+    # 获取Skia源代码（仅用于获取头文件）
+    - name: 获取Skia源代码
+      run: |
+        git clone https://skia.googlesource.com/skia.git
+        cd skia
+        python tools/git-sync-deps
+        
+    # 收集所有头文件
+    - name: 收集共享头文件
+      run: |
+        cd skia
+        
+        # 创建头文件目录结构
+        mkdir -p artifacts/include/include  # Skia头文件目录
+        mkdir -p artifacts/include/dawn     # Dawn WebGPU头文件目录
+        mkdir -p artifacts/include/modules  # Skia模块头文件目录
+        
+        # 复制Skia头文件到include/include目录（保持原有的include目录名）
+        echo "复制Skia头文件..."
+        cp -r include/* artifacts/include/include/
+        
+        # 复制Dawn WebGPU头文件
+        echo "复制Dawn WebGPU头文件..."
+        if [ -d "third_party/externals/dawn/include" ]; then
+          cp -r third_party/externals/dawn/include/* artifacts/include/dawn/
+        fi
+        
+        # 复制modules目录
+        if [ -d "modules" ]; then
+          echo "复制Skia模块头文件..."
+          cp -r modules/* artifacts/include/modules/
+        fi
+        
+        echo "✅ 共享头文件收集完成"
+        
+    # 上传共享头文件
+    - name: 上传共享头文件
+      uses: actions/upload-artifact@v4
+      with:
+        name: shared-headers
+        path: skia/artifacts/
+        retention-days: 30
+
   # 创建统一的Skia构建包
   create-unified-package:
-    needs: build-skia
+    needs: [build-skia, collect-headers]
     runs-on: ubuntu-latest
     
     steps:
@@ -388,22 +432,39 @@ jobs:
         path: artifacts
         
     # 创建统一的Skia包结构
-    - name: 创建统一Skia包
+    - name: 创建统一Skdn包
       run: |
         # 创建Skdn包的根目录结构
-        mkdir -p Skdn/include
-        mkdir -p Skdn/lib
-        mkdir -p Skdn/bin
-        mkdir -p Skdn/examples
+        mkdir -p Skdn
         
-        # 整理所有平台的构建产物到统一结构
+        # 合并所有平台的构建产物
+        echo "合并平台构建产物..."
         for artifact_dir in artifacts/*/; do
-          if [ -d "$artifact_dir" ]; then
-            cp -r "$artifact_dir"* Skdn/ 2>/dev/null || true
+          if [ -d "$artifact_dir" ] && [[ ! "$artifact_dir" =~ shared-headers ]]; then
+            echo "处理构建产物: $artifact_dir"
+            if [ -d "$artifact_dir/bin" ]; then
+              cp -r "$artifact_dir/bin" Skdn/ 2>/dev/null || true
+            fi
+            if [ -d "$artifact_dir/lib" ]; then
+              cp -r "$artifact_dir/lib" Skdn/ 2>/dev/null || true
+            fi
           fi
         done
         
+        # 复制共享头文件
+        echo "复制共享头文件..."
+        if [ -d "artifacts/shared-headers/include" ]; then
+          cp -r artifacts/shared-headers/include Skdn/
+        fi
+        
+        # 创建示例目录
+        mkdir -p Skdn/examples
+        
         echo "✅ 统一Skdn包结构创建完成"
+        
+        # 显示最终的目录结构
+        echo "最终目录结构:"
+        find Skdn -type d | head -20
         
     # 生成统一的CMakeLists.txt文件
     - name: 生成统一CMakeLists.txt
@@ -431,6 +492,18 @@ jobs:
         add_library(Skdn INTERFACE)
         add_library(Skdn::Skdn ALIAS Skdn)
         
+        # 设置共享头文件包含目录
+        target_include_directories(Skdn INTERFACE
+            $<BUILD_INTERFACE:${SKDN_ROOT_DIR}/include>
+            $<BUILD_INTERFACE:${SKDN_ROOT_DIR}/include/include>   # Skia头文件
+            $<BUILD_INTERFACE:${SKDN_ROOT_DIR}/include/dawn>      # Dawn WebGPU头文件
+            $<BUILD_INTERFACE:${SKDN_ROOT_DIR}/include/modules>   # Skia模块头文件
+            $<INSTALL_INTERFACE:include>
+            $<INSTALL_INTERFACE:include/include>
+            $<INSTALL_INTERFACE:include/dawn>
+            $<INSTALL_INTERFACE:include/modules>
+        )
+        
         # 检测当前平台和架构
         if(WIN32)
             set(SKDN_PLATFORM "Win")
@@ -439,6 +512,11 @@ jobs:
             else()
                 set(SKDN_ARCH "x86")
             endif()
+        elseif(APPLE)
+            # macOS暂时不支持，显示警告信息
+            message(WARNING "macOS平台暂时不被支持，正在解决C++20兼容性问题")
+            message(WARNING "请使用Windows、Linux或Android版本")
+            return()
         elseif(ANDROID)
             set(SKDN_PLATFORM "Android")
             if(CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a")
@@ -457,31 +535,57 @@ jobs:
             endif()
         endif()
         
-        # 设置平台特定的路径
+        # 设置平台特定的库和二进制文件路径
         set(SKDN_LIB_DIR "${SKDN_ROOT_DIR}/lib/${SKDN_PLATFORM}/${SKDN_ARCH}")
         set(SKDN_BIN_DIR "${SKDN_ROOT_DIR}/bin/${SKDN_PLATFORM}/${SKDN_ARCH}")
-        set(SKDN_INCLUDE_DIR "${SKDN_ROOT_DIR}/include/${SKDN_PLATFORM}/${SKDN_ARCH}")
-        
-        # 设置包含目录
-        target_include_directories(Skdn INTERFACE
-            $<BUILD_INTERFACE:${SKDN_INCLUDE_DIR}/skia>
-            $<BUILD_INTERFACE:${SKDN_INCLUDE_DIR}/dawn>
-            $<BUILD_INTERFACE:${SKDN_INCLUDE_DIR}/modules>
-            $<INSTALL_INTERFACE:include/${SKDN_PLATFORM}/${SKDN_ARCH}/skia>
-            $<INSTALL_INTERFACE:include/${SKDN_PLATFORM}/${SKDN_ARCH}/dawn>
-            $<INSTALL_INTERFACE:include/${SKDN_PLATFORM}/${SKDN_ARCH}/modules>
-        )
         
         # 检查库目录是否存在
         if(NOT EXISTS "${SKDN_LIB_DIR}")
             message(WARNING "Skdn库目录不存在: ${SKDN_LIB_DIR}")
             message(STATUS "当前平台: ${SKDN_PLATFORM}, 架构: ${SKDN_ARCH}")
+            # 尝试查找可用的平台目录
+            file(GLOB AVAILABLE_PLATFORMS "${SKDN_ROOT_DIR}/lib/*")
+            if(AVAILABLE_PLATFORMS)
+                message(STATUS "可用的平台目录:")
+                foreach(platform_dir ${AVAILABLE_PLATFORMS})
+                    get_filename_component(platform_name "${platform_dir}" NAME)
+                    file(GLOB AVAILABLE_ARCHS "${platform_dir}/*")
+                    foreach(arch_dir ${AVAILABLE_ARCHS})
+                        get_filename_component(arch_name "${arch_dir}" NAME)
+                        message(STATUS "  - ${platform_name}/${arch_name}")
+                    endforeach()
+                endforeach()
+            endif()
         endif()
         
-        # 查找Skia库文件
-        file(GLOB SKDN_LIBRARIES "${SKDN_LIB_DIR}/*")
+        # 查找Skia核心库文件
+        file(GLOB SKDN_CORE_LIBRARIES "${SKDN_LIB_DIR}/libskia*.lib" "${SKDN_LIB_DIR}/libskia*.a")
+        # 查找Skia Graphite库文件  
+        file(GLOB SKDN_GRAPHITE_LIBRARIES "${SKDN_LIB_DIR}/libskgraphite*.lib" "${SKDN_LIB_DIR}/libskgraphite*.a" "${SKDN_LIB_DIR}/*graphite*.lib" "${SKDN_LIB_DIR}/*graphite*.a")
+        # 查找Dawn WebGPU库文件
+        file(GLOB SKDN_DAWN_LIBRARIES "${SKDN_LIB_DIR}/libdawn*.lib" "${SKDN_LIB_DIR}/libdawn*.a" "${SKDN_LIB_DIR}/dawn*.lib" "${SKDN_LIB_DIR}/dawn*.a")
+        # 查找其他所有库文件
+        file(GLOB SKDN_ALL_LIBRARIES "${SKDN_LIB_DIR}/*.lib" "${SKDN_LIB_DIR}/*.a")
+        
+        # 合并所有库文件
+        set(SKDN_LIBRARIES ${SKDN_CORE_LIBRARIES} ${SKDN_GRAPHITE_LIBRARIES} ${SKDN_DAWN_LIBRARIES})
+        # 去重并添加剩余的库文件
+        foreach(lib ${SKDN_ALL_LIBRARIES})
+            list(FIND SKDN_LIBRARIES ${lib} found_index)
+            if(found_index EQUAL -1)
+                list(APPEND SKDN_LIBRARIES ${lib})
+            endif()
+        endforeach()
+        
         if(NOT SKDN_LIBRARIES)
             message(WARNING "在 ${SKDN_LIB_DIR} 中未找到库文件")
+            # 列出目录中的所有文件用于调试
+            file(GLOB DEBUG_FILES "${SKDN_LIB_DIR}/*")
+            message(STATUS "目录中的文件:")
+            foreach(debug_file ${DEBUG_FILES})
+                get_filename_component(debug_filename "${debug_file}" NAME)
+                message(STATUS "  - ${debug_filename}")
+            endforeach()
         endif()
         
         # 根据平台设置特定的链接库和编译选项
@@ -503,13 +607,20 @@ jobs:
             
             # 设置MSVC特定的编译选项
             target_compile_options(Skdn INTERFACE
-                $<$<CXX_COMPILER_ID:MSVC>:/utf-8>
-                $<$<CXX_COMPILER_ID:MSVC>:/permissive->
-                $<$<CXX_COMPILER_ID:MSVC>:/Zc:__cplusplus>
+                $<$<CXX_COMPILER_ID:MSVC>:/utf-8>        # 使用UTF-8编码
+                $<$<CXX_COMPILER_ID:MSVC>:/permissive->  # 严格C++标准符合性
+                $<$<CXX_COMPILER_ID:MSVC>:/Zc:__cplusplus> # 正确设置__cplusplus宏
                 $<$<CONFIG:Debug>:/MDd>
                 $<$<CONFIG:Release>:/MD>
                 $<$<CONFIG:RelWithDebInfo>:/MD>
                 $<$<CONFIG:MinSizeRel>:/MD>
+            )
+            
+            # 移除MSVC不支持的LTO选项，设置适当的优化
+            target_compile_options(Skdn INTERFACE
+                $<$<CONFIG:Debug>:/Od>
+                $<$<CONFIG:Release>:/O2 /DNDEBUG>
+                $<$<CONFIG:RelWithDebInfo>:/O2 /DNDEBUG>
             )
             
             # 添加Windows系统库（包含DirectX和其他图形API）
@@ -539,6 +650,10 @@ jobs:
                 Ws2_32
                 # 多媒体
                 winmm
+                # 额外的系统库
+                Imm32
+                Version
+                Bcrypt
             )
             
         elseif(ANDROID)
@@ -611,6 +726,18 @@ jobs:
                 $<$<CXX_COMPILER_ID:Clang>:-stdlib=libc++>
             )
             
+            # Linux平台的LTO支持
+            target_compile_options(Skdn INTERFACE
+                $<$<CONFIG:Debug>:-g -O0>
+                $<$<CONFIG:Release>:-O3 -DNDEBUG -flto>
+                $<$<CONFIG:RelWithDebInfo>:-O2 -g -DNDEBUG -flto>
+            )
+            
+            target_link_options(Skdn INTERFACE
+                $<$<CONFIG:Release>:-flto>
+                $<$<CONFIG:RelWithDebInfo>:-flto>
+            )
+            
             # 查找必要的系统库
             find_package(PkgConfig QUIET)
             if(PKG_CONFIG_FOUND)
@@ -678,19 +805,6 @@ jobs:
         # 设置编译选项
         target_compile_features(Skdn INTERFACE cxx_std_20)
         
-        # 现代C++优化设置
-        target_compile_options(Skdn INTERFACE
-            $<$<CONFIG:Debug>:-g -O0>
-            $<$<CONFIG:Release>:-O3 -DNDEBUG -flto>
-            $<$<CONFIG:RelWithDebInfo>:-O2 -g -DNDEBUG -flto>
-        )
-        
-        # 现代C++特性和优化的链接选项
-        target_link_options(Skdn INTERFACE
-            $<$<CONFIG:Release>:-flto>
-            $<$<CONFIG:RelWithDebInfo>:-flto>
-        )
-        
         # 设置预处理器定义
         target_compile_definitions(Skdn INTERFACE
             $<$<CONFIG:Debug>:SK_DEBUG>
@@ -705,11 +819,19 @@ jobs:
         message(STATUS "  编译器: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
         message(STATUS "  库目录: ${SKDN_LIB_DIR}")
         message(STATUS "  二进制目录: ${SKDN_BIN_DIR}")
-        message(STATUS "  头文件目录: ${SKDN_INCLUDE_DIR}")
+        message(STATUS "  头文件目录: ${SKDN_ROOT_DIR}/include")
         message(STATUS "  GPU后端: Ganesh + Graphite + Dawn WebGPU")
+        
         if(SKDN_LIBRARIES)
             list(LENGTH SKDN_LIBRARIES lib_count)
             message(STATUS "  找到的库文件数量: ${lib_count}")
+            message(STATUS "  库文件列表:")
+            foreach(lib ${SKDN_LIBRARIES})
+                get_filename_component(lib_name "${lib}" NAME)
+                message(STATUS "    - ${lib_name}")
+            endforeach()
+        else()
+            message(WARNING "  未找到任何库文件!")
         endif()
         EOF
         
@@ -720,43 +842,40 @@ jobs:
         Skia + Dawn WebGPU 全平台预编译库
         =====================================
         
+        目录结构:
+        =========
+        Skdn/
+        ├── bin/                   # 二进制文件目录（按平台组织）
+        │   ├── Win/x64/          # Windows x64 二进制文件
+        │   ├── Linux/x64/        # Linux x64 二进制文件
+        │   └── Android/          # Android 二进制文件
+        │       ├── x64/
+        │       └── arm64/
+        ├── lib/                   # 库文件目录（按平台组织）
+        │   ├── Win/x64/          # Windows x64 库文件
+        │   ├── Linux/x64/        # Linux x64 库文件
+        │   └── Android/          # Android 库文件
+        │       ├── x64/
+        │       └── arm64/
+        ├── include/               # 共享头文件目录
+        │   ├── include/          # Skia头文件（保持原有include目录名）
+        │   ├── dawn/             # Dawn WebGPU头文件
+        │   └── modules/          # Skia模块头文件
+        ├── CMakeLists.txt         # 智能CMake配置
+        └── BUILD_INFO.txt         # 构建信息文档
+        
         构建信息:
         =========
         ✅ Windows x64 - 完全支持（DirectX 11/12 + Vulkan + OpenGL）
         ✅ Linux x64 - 完全支持（Vulkan + OpenGL + X11 + Wayland）
         ✅ Android x64/ARM64 - 完全支持（Vulkan + OpenGL ES）
         
-        包含的头文件:
-        =============
-        - Skia完整头文件集合（include/skia/）
-        - Dawn WebGPU完整头文件集合（include/dawn/）
-        - Skia模块头文件（include/modules/）
-        
-        编译器版本信息:
-        - Windows: MSVC 2022 + C++20标准
-        - Linux: GCC 13 + C++20标准
-        - Android: Clang 18 (NDK r25c) + C++20标准
-        
-        支持的平台和图形API:
-        
-        Windows平台:
-        - DirectX 11/12（本地Windows API）
-        - Vulkan（跨平台现代图形API）
-        - OpenGL（传统图形API）
-        - Dawn WebGPU（面向未来的图形API）
-        
-        Linux平台:
-        - Vulkan（现代图形API）
-        - OpenGL（传统图形API）
-        - X11显示协议支持
-        - Wayland显示协议支持
-        - Dawn WebGPU（面向未来的图形API）
-        
-        Android平台:
-        - Vulkan（现代移动图形API）
-        - OpenGL ES 2.0/3.0（移动图形API）
-        - EGL（图形上下文管理）
-        - Dawn WebGPU（面向未来的图形API）
+        头文件说明:
+        ===========
+        - 所有平台共享相同的头文件
+        - include/include/ - Skia核心头文件
+        - include/dawn/ - Dawn WebGPU头文件
+        - include/modules/ - Skia模块头文件
         
         CMake使用方法:
         =============
@@ -778,6 +897,23 @@ jobs:
         target_link_libraries(MyApp PRIVATE Skdn::Skdn)
         \`\`\`
         
+        头文件使用示例:
+        ===============
+        \`\`\`cpp
+        // Skia核心头文件
+        #include <include/core/SkCanvas.h>
+        #include <include/core/SkSurface.h>
+        #include <include/gpu/GrDirectContext.h>
+        
+        // Dawn WebGPU头文件
+        #include <webgpu/webgpu_cpp.h>
+        #include <dawn/dawn_proc.h>
+        
+        // Skia模块头文件
+        #include <modules/skottie/include/Skottie.h>
+        #include <modules/svg/include/SkSVGDOM.h>
+        \`\`\`
+        
         自动启用的功能:
         ===============
         \`\`\`cpp
@@ -788,38 +924,18 @@ jobs:
         #define SK_VULKAN 1          // Vulkan支持
         #define SK_GL 1              // OpenGL支持
         #define WEBGPU_IMPLEMENTATION_DAWN 1  // Dawn WebGPU实现
-        
-        // 平台特定支持会自动定义
-        #ifdef WIN32
-        // Windows: DirectX, Vulkan, OpenGL
-        #elif ANDROID  
-        // Android: Vulkan, OpenGL ES, EGL
-        #else
-        // Linux: Vulkan, OpenGL, X11, Wayland
-        #endif
         \`\`\`
         
-        目录结构:
-        =========
-        \`\`\`
-        Skdn/
-        ├── include/              # 头文件目录
-        │   ├── Win/x64/         # Windows头文件
-        │   ├── Linux/x64/       # Linux头文件
-        │   └── Android/         # Android头文件
-        │       ├── x64/
-        │       └── arm64/
-        ├── lib/                 # 库文件目录（同样的平台结构）
-        ├── bin/                 # 二进制文件目录（同样的平台结构）
-        ├── CMakeLists.txt       # 智能CMake配置
-        └── BUILD_INFO.txt       # 构建信息文档
-        \`\`\`
+        编译器版本信息:
+        - Windows: MSVC 2022 + C++20标准
+        - Linux: GCC 13 + C++20标准
+        - Android: Clang 18 (NDK r25c) + C++20标准
         
         特殊说明:
         =========
         - 自动检测平台并链接相应的图形API库
         - C++20标准要求（Dawn WebGPU需要）
-        - 完整的头文件包含，支持所有Skia和Dawn功能
+        - 头文件所有平台共享，无需平台特定配置
         - 跨平台统一接口，一次编写到处运行
         - 生产环境就绪，性能优化
         EOF
@@ -883,21 +999,39 @@ jobs:
         tag_name: ${{ steps.get_tag.outputs.tag }}
         name: ${{ steps.get_tag.outputs.name }}
         body: |
-          # Skia + Dawn WebGPU 全平台预编译库（包含完整头文件）
+          # Skia + Dawn WebGPU 全平台预编译库（优化目录结构）
           
-          这是包含完整Skia和Dawn WebGPU头文件的全平台预编译库，支持Windows、Linux、Android平台，提供统一的CMake接口和自动平台检测。
+          这是包含完整Skia和Dawn WebGPU的全平台预编译库，采用优化的目录结构，支持Windows、Linux、Android平台，提供统一的CMake接口。
           
           ## 📦 包含内容
           
-          **Skdn_Prebuilt.zip** - 完整预编译库（Skia + Dawn WebGPU + 完整头文件）
+          **Skdn_Prebuilt.zip** - 完整预编译库（优化目录结构 + 共享头文件）
           
-          ## ✨ 主要特性
+          ## 📁 优化的目录结构
           
-          ### 🔧 完整头文件支持
-          - **Skia完整头文件集合** - 所有Skia功能的头文件
-          - **Dawn WebGPU完整头文件集合** - 完整的WebGPU API支持
-          - **模块头文件** - Skia扩展模块支持
-          - **按平台组织** - 每个平台独立的头文件目录
+          ```
+          Skdn/
+          ├── bin/                   # 二进制文件（按平台组织）
+          │   ├── Win/x64/          # Windows x64
+          │   ├── Linux/x64/        # Linux x64  
+          │   └── Android/x64/      # Android x64/arm64
+          ├── lib/                   # 库文件（按平台组织）
+          │   ├── Win/x64/          # Windows x64
+          │   ├── Linux/x64/        # Linux x64
+          │   └── Android/x64/      # Android x64/arm64
+          ├── include/               # 共享头文件
+          │   ├── include/          # Skia头文件
+          │   ├── dawn/             # Dawn WebGPU头文件
+          │   └── modules/          # Skia模块头文件
+          └── CMakeLists.txt         # 智能CMake配置
+          ```
+          
+          ## ✨ 主要改进
+          
+          ### 🔧 优化的目录结构
+          - **平台优先组织** - `bin/平台/架构` 和 `lib/平台/架构`
+          - **共享头文件** - 所有平台使用相同的头文件目录
+          - **简化配置** - CMake只需添加 `include/` 目录即可
           
           ### 🎮 多图形API支持
           - **Windows**: DirectX 11/12 + Vulkan + OpenGL
@@ -908,14 +1042,6 @@ jobs:
           - **C++20标准** - 完整的现代C++特性支持
           - **三重GPU后端** - Ganesh + Graphite + Dawn WebGPU
           - **智能CMake配置** - 自动平台检测和库链接
-          
-          ## 🏗️ 支持的平台
-          
-          | 平台 | 架构 | 编译器 | 图形API |
-          |------|------|--------|---------|
-          | Windows | x64 | MSVC 2022 | DirectX 11/12, Vulkan, OpenGL |
-          | Linux | x64 | GCC 13 | Vulkan, OpenGL, X11, Wayland |
-          | Android | x64/ARM64 | Clang 18 | Vulkan, OpenGL ES, EGL |
           
           ## 📋 快速开始
           
@@ -944,12 +1070,20 @@ jobs:
           target_link_libraries(MyApp PRIVATE Skdn::Skdn)
           ```
           
-          ### 3. 代码示例
+          ### 3. 头文件使用
           ```cpp
+          // Skia核心头文件
           #include <include/core/SkCanvas.h>
           #include <include/core/SkSurface.h>
+          #include <include/gpu/GrDirectContext.h>
+          
+          // Dawn WebGPU头文件
           #include <webgpu/webgpu_cpp.h>
           #include <dawn/dawn_proc.h>
+          
+          // Skia模块头文件
+          #include <modules/skottie/include/Skottie.h>
+          #include <modules/svg/include/SkSVGDOM.h>
           
           int main() {
               // 自动启用的宏定义
@@ -958,72 +1092,53 @@ jobs:
               static_assert(SK_DAWN == 1);
               static_assert(WEBGPU_IMPLEMENTATION_DAWN == 1);
               
-              // 初始化Dawn WebGPU
-              dawnProcSetProcs(&dawn::native::GetProcs());
-              
-              // 创建Skia表面和WebGPU设备...
-              // 你的渲染代码
-              
+              // 你的渲染代码...
               return 0;
           }
           ```
           
-          ## 🔧 自动启用的功能
+          ## 🔧 自动库链接
           
-          CMake配置会根据平台自动：
+          CMake配置会根据平台自动链接：
           
           ### Windows平台
-          - 链接DirectX 11/12库 (`d3d11.lib`, `d3d12.lib`, `dxgi.lib`)
-          - 链接Vulkan库 (`vulkan-1.lib`)
-          - 链接OpenGL库 (`OpenGL32.lib`)
-          - 链接系统库 (`Gdi32.lib`, `User32.lib`, `Kernel32.lib`等)
+          - DirectX库：`d3d11.lib`, `d3d12.lib`, `dxgi.lib`, `dxcore.lib`
+          - OpenGL库：`OpenGL32.lib`
+          - 系统库：`Gdi32.lib`, `User32.lib`, `Kernel32.lib`等
           
           ### Linux平台
-          - 链接Vulkan库 (`libvulkan.so`)
-          - 链接OpenGL库 (`libGL.so`)
-          - 链接X11库 (`libX11.so`, `libXrandr.so`等)
-          - 链接Wayland库 (`libwayland-client.so`等)
+          - Vulkan库：`libvulkan.so`
+          - OpenGL库：`libGL.so`
+          - X11库：`libX11.so`, `libXrandr.so`等
+          - Wayland库：`libwayland-client.so`等
           
           ### Android平台
-          - 链接Vulkan库 (`libvulkan.so`)
-          - 链接OpenGL ES库 (`libGLESv2.so`, `libGLESv3.so`)
-          - 链接EGL库 (`libEGL.so`)
-          - 链接Android系统库 (`libandroid.so`, `liblog.so`等)
+          - Vulkan库：`libvulkan.so`
+          - OpenGL ES库：`libGLESv2.so`, `libGLESv3.so`
+          - EGL库：`libEGL.so`
+          - Android系统库：`libandroid.so`, `liblog.so`等
           
-          ## 📁 目录结构
+          ## 🏗️ 支持的平台
           
-          ```
-          Skdn/
-          ├── include/                 # 头文件目录
-          │   ├── Win/x64/            # Windows x64头文件
-          │   │   ├── skia/           # Skia头文件
-          │   │   ├── dawn/           # Dawn WebGPU头文件
-          │   │   └── modules/        # Skia模块头文件
-          │   ├── Linux/x64/          # Linux x64头文件
-          │   └── Android/            # Android头文件
-          │       ├── x64/
-          │       └── arm64/
-          ├── lib/                    # 库文件目录
-          │   ├── Win/x64/           # Windows库文件
-          │   ├── Linux/x64/         # Linux库文件
-          │   └── Android/           # Android库文件
-          ├── bin/                    # 二进制文件目录
-          ├── CMakeLists.txt          # 智能CMake配置
-          └── BUILD_INFO.txt          # 详细构建信息
-          ```
+          | 平台 | 架构 | 编译器 | 目录路径 |
+          |------|------|--------|----------|
+          | Windows | x64 | MSVC 2022 | `bin/Win/x64/`, `lib/Win/x64/` |
+          | Linux | x64 | GCC 13 | `bin/Linux/x64/`, `lib/Linux/x64/` |
+          | Android | x64 | Clang 18 | `bin/Android/x64/`, `lib/Android/x64/` |
+          | Android | ARM64 | Clang 18 | `bin/Android/arm64/`, `lib/Android/arm64/` |
           
           ## 🎯 技术特性
           
           - **Interface Target**: `Skdn::Skdn` - 现代CMake接口目标
           - **自动平台检测** - 无需手动配置平台相关设置
           - **智能库链接** - 根据平台自动链接正确的图形API库
-          - **完整头文件** - 包含所有Skia和Dawn WebGPU的头文件
+          - **共享头文件** - 所有平台使用相同的头文件，简化配置
           - **C++20支持** - 完整的现代C++特性和Dawn WebGPU要求
           - **生产就绪** - 经过完整测试和优化的预编译库
           
           ---
           
-          > **🚀 现在就开始**: 下载Skdn_Prebuilt.zip，解压到项目中，即可享受Skia强大的2D图形功能和Dawn WebGPU的现代3D渲染能力！
+          > **🚀 立即开始**: 下载Skdn_Prebuilt.zip，享受优化的目录结构和简化的配置！
         files: |
           Skdn_Prebuilt.zip
         draft: false
