@@ -294,6 +294,7 @@ jobs:
         
         # 根据不同平台和编译器设置特定参数
         # 重要：每个平台分别设置完整的编译参数，避免重复定义
+        # 修复：分别设置C和C++编译标准，避免混用
         case "${{ matrix.target_os }}" in
           "win")
             # Windows平台特定配置 - 使用MSVC 2022和/MD运行时
@@ -310,8 +311,8 @@ jobs:
             args="$args dawn_enable_d3d12=true"
             args="$args dawn_enable_vulkan=true"
             args="$args dawn_enable_desktop_gl=true"
-            # 设置Windows编译参数（统一设置，避免重复）
-            args="$args extra_cflags=[\"/MD\", \"/std:c++latest\"]"
+            # 设置Windows编译参数（分别设置C和C++标准）
+            args="$args extra_cflags=[\"/MD\"]"
             args="$args extra_cflags_c=[\"/MD\"]"
             args="$args extra_cflags_cc=[\"/MD\", \"/std:c++latest\"]"
             ;;
@@ -330,15 +331,13 @@ jobs:
             args="$args dawn_enable_metal=true"
             args="$args dawn_enable_vulkan=true"
             args="$args dawn_enable_desktop_gl=true"
-            # 强制设置macOS编译参数使用C++20（关键修复）
-            # 同时设置额外的强制参数来覆盖Dawn的默认设置
+            # 修复：分别设置C和C++编译标准，避免C文件使用C++标准
+            # C文件不设置标准，使用默认C标准
+            args="$args extra_cflags_c=[\"-stdlib=libc++\"]"
+            # 只有C++文件使用C++20标准
             args="$args extra_cflags_cc=[\"-std=c++20\", \"-stdlib=libc++\"]"
-            args="$args extra_cflags=[\"-std=c++20\"]"
             # 强制覆盖Dawn的C++标准设置
             args="$args dawn_cxx_standard=\"c++20\""
-            # 设置额外的编译器参数来确保C++20生效
-            args="$args cflags_cc=[\"-std=c++20\", \"-stdlib=libc++\"]"
-            args="$args cflags=[\"-std=c++20\"]"
             if [ "${{ matrix.target_cpu }}" = "arm64" ]; then
               args="$args target_cpu=\"arm64\""
             fi
@@ -358,14 +357,16 @@ jobs:
             args="$args dawn_enable_desktop_gl=true"
             args="$args dawn_use_wayland=true"
             args="$args dawn_use_x11=true"
-            # 根据编译器设置Linux编译参数（修复C++20兼容性问题）
-            # Dawn需要C++20特性，所以统一使用C++20
+            # 根据编译器设置Linux编译参数（分别设置C和C++标准）
             if [ "${{ matrix.compiler }}" = "gcc13" ]; then
+              # C文件不设置标准，使用默认C标准
+              args="$args extra_cflags_c=[]"
+              # 只有C++文件使用C++20标准
               args="$args extra_cflags_cc=[\"-std=c++20\"]"
-              args="$args extra_cflags=[\"-std=c++20\"]"
             else
+              # Clang编译器
+              args="$args extra_cflags_c=[\"-stdlib=libc++\"]"
               args="$args extra_cflags_cc=[\"-std=c++20\", \"-stdlib=libc++\"]"
-              args="$args extra_cflags=[\"-std=c++20\"]"
             fi
             # 强制覆盖Dawn的C++标准设置
             args="$args dawn_cxx_standard=\"c++20\""
@@ -385,10 +386,11 @@ jobs:
             # Dawn WebGPU Android特定配置
             args="$args dawn_enable_vulkan=true"
             args="$args dawn_enable_opengles=true"
-            # 设置Android编译参数（修复C++20兼容性问题）
-            # Dawn需要C++20特性，所以统一使用C++20
+            # 设置Android编译参数（分别设置C和C++标准）
+            # C文件不设置标准，使用默认C标准
+            args="$args extra_cflags_c=[]"
+            # 只有C++文件使用C++20标准
             args="$args extra_cflags_cc=[\"-std=c++20\"]"
-            args="$args extra_cflags=[\"-std=c++20\"]"
             # 强制覆盖Dawn的C++标准设置
             args="$args dawn_cxx_standard=\"c++20\""
             ;;
@@ -929,16 +931,22 @@ jobs:
         cat > Skia/BUILD_INFO.txt << EOF
         Skia 全平台统一构建包（双GPU后端 + 现代C++20 + Clang 18）
         =========================================================
-        构建版本: v${{ github.run_number }}
         
         重要修复:
         =========
+        ✅ 修复了C文件被错误使用C++标准参数的问题
+        ✅ 分别设置C和C++编译标准，避免混用导致的编译错误
         ✅ 修复了macOS平台Clang 18指定安装问题
         ✅ 修复了Dawn WebGPU的C++标准兼容性问题
         ✅ 强制所有平台使用C++20标准以支持Dawn的现代C++特性
-        ✅ 增加了多重编译器参数覆盖以确保C++20生效
         ✅ 修复了Linux平台缺少X11开发库的问题
         ✅ 解决了构建参数重复定义的问题
+        
+        编译标准分离设置:
+        ==================
+        为了避免C文件被错误使用C++标准参数，现在分别设置：
+        - extra_cflags_c: 仅用于C文件编译，不包含C++标准参数
+        - extra_cflags_cc: 仅用于C++文件编译，包含C++20标准参数
         
         编译器版本信息:
         - Windows: MSVC 2022 + C++20标准
@@ -951,7 +959,8 @@ jobs:
         桌面平台:
         - Windows x64 (Win/x64)
           * 编译器: MSVC 2022
-          * C++标准: C++20
+          * C标准: 默认C标准
+          * C++标准: C++20（/std:c++latest）
           * GPU后端: Direct3D 11/12 + OpenGL + Vulkan + Ganesh + Graphite + Dawn WebGPU
           * 运行时: /MD (多线程DLL)
           * 特殊特性: UTF-8编码，严格标准符合性
@@ -959,14 +968,16 @@ jobs:
         - macOS Intel x64 (macOS/x64)
         - macOS Apple Silicon ARM64 (macOS/arm64)
           * 编译器: Clang 18（强制指定版本）
-          * C++标准: C++20（多重参数确保生效）
+          * C标准: 默认C标准 + libc++
+          * C++标准: C++20 + libc++
           * 标准库: libc++
           * GPU后端: Metal + OpenGL + Vulkan + Ganesh + Graphite + Dawn WebGPU
           * 完整DNG RAW支持
-          * 特殊修复: 覆盖Dawn默认C++17设置
+          * 特殊修复: 覆盖Dawn默认C++17设置，分离C/C++编译参数
         
         - Linux x64 (Linux/x64)
           * 编译器: GCC 13
+          * C标准: 默认C标准
           * C++标准: C++20
           * GPU后端: OpenGL + Vulkan + Ganesh + Graphite + Dawn WebGPU
           * 显示协议: X11 + Wayland双支持
@@ -976,10 +987,25 @@ jobs:
         - Android x64 (Android/x64)
         - Android ARM64 (Android/arm64)
           * 编译器: Clang 18 (NDK r25c)
+          * C标准: 默认C标准
           * C++标准: C++20
           * GPU后端: OpenGL ES 2.0/3.0 + Vulkan + Ganesh + Graphite + Dawn WebGPU
           * Android API级别: 21+
           * 特殊特性: 位置无关代码(PIC)，禁用RTTI和异常
+        
+        编译参数修复详情:
+        ==================
+        
+        修复前（错误）:
+        - extra_cflags=["-std=c++20"]  # 错误：C文件也会使用C++标准
+        
+        修复后（正确）:
+        - extra_cflags_c=[]            # C文件使用默认C标准
+        - extra_cflags_cc=["-std=c++20"] # 仅C++文件使用C++20标准
+        
+        macOS特殊配置:
+        - extra_cflags_c=["-stdlib=libc++"]           # C文件使用libc++
+        - extra_cflags_cc=["-std=c++20", "-stdlib=libc++"] # C++文件使用C++20+libc++
         
         macOS Clang 18安装详情:
         ========================
@@ -1016,19 +1042,6 @@ jobs:
         - Linux: Vulkan, OpenGL, Wayland, X11
         - Android: Vulkan, OpenGL ES
         
-        编译器强制C++20设置:
-        ====================
-        为确保Dawn WebGPU正常工作，以下多重参数被设置：
-        
-        macOS特殊配置:
-        - extra_cflags_cc=["-std=c++20", "-stdlib=libc++"]
-        - extra_cflags=["-std=c++20"]
-        - dawn_cxx_standard="c++20"
-        - cflags_cc=["-std=c++20", "-stdlib=libc++"]
-        - cflags=["-std=c++20"]
-        
-        其他平台类似的多重覆盖确保C++20标准生效。
-        
         CMake使用方法:
         =============
         
@@ -1061,6 +1074,7 @@ jobs:
         特殊说明:
         =========
         - CMakeLists.txt自动检测编译器并应用最佳优化设置
+        - 分别设置C和C++编译标准，避免参数混用
         - 强制使用C++20标准以支持Dawn WebGPU的现代C++特性
         - 使用链接时优化(LTO)提升Release构建性能
         - 内置所有依赖库，避免系统库版本冲突
@@ -1134,70 +1148,56 @@ jobs:
         tag_name: ${{ steps.get_tag.outputs.tag }}
         name: ${{ steps.get_tag.outputs.name }}
         body: |
-          # Skia 全平台预编译统一构建包（Clang 18 + C++20 + 三重GPU后端）
+          # Skia 全平台预编译统一构建包（修复C/C++编译标准混用问题）
           
-          这是包含所有支持平台的Skia图形库完整预编译版本，修复了macOS Clang版本问题和Dawn WebGPU兼容性问题，强制使用Clang 18和C++20标准，支持Ganesh、Graphite、Dawn WebGPU三重GPU后端。
+          这是包含所有支持平台的Skia图形库完整预编译版本，修复了C文件被错误使用C++标准参数的问题，分别设置C和C++编译标准，支持Ganesh、Graphite、Dawn WebGPU三重GPU后端。
           
           ## 🔧 重要修复
           
+          ✅ **修复了C文件被错误使用C++标准参数的问题** - 分别设置`extra_cflags_c`和`extra_cflags_cc`参数  
+          ✅ **分别设置C和C++编译标准** - 避免`-std=c++20`参数被用于编译C文件  
           ✅ **修复了macOS平台Clang版本问题** - 强制安装和使用Clang 18而非系统默认版本  
           ✅ **修复了Dawn WebGPU的C++标准兼容性问题** - 强制所有平台使用C++20标准  
-          ✅ **增加了多重编译器参数覆盖** - 确保C++20设置不被Dawn默认设置覆盖  
           ✅ **修复了Linux平台缺少X11开发库的问题** - 完整安装X11相关开发库  
-          ✅ **解决了构建参数重复定义的问题** - 避免extra_cflags_cc参数冲突  
           
           ## 📦 包含内容
           
-          **Skia_Prebuilt.zip** - 统一全平台构建包（Clang 18 + C++20 + 三重GPU后端）
+          **Skia_Prebuilt.zip** - 统一全平台构建包（修复编译标准混用问题）
+          
+          ## 🛠️ 编译标准分离配置
+          
+          ### 🔧 修复前的问题
+          ```bash
+          # 错误配置：C文件也被使用了C++标准参数
+          args="$args extra_cflags=[\"-std=c++20\"]"
+          # 导致错误：error: invalid argument '-std=c++20' not allowed with 'C'
+          ```
+          
+          ### ✅ 修复后的正确配置
+          ```bash
+          # 正确配置：分别设置C和C++编译参数
+          args="$args extra_cflags_c=[]"                    # C文件使用默认C标准
+          args="$args extra_cflags_cc=[\"-std=c++20\"]"     # 仅C++文件使用C++20标准
+          ```
+          
+          ### 🍎 macOS特殊配置
+          ```bash
+          # macOS的正确配置
+          args="$args extra_cflags_c=[\"-stdlib=libc++\"]"           # C文件使用libc++
+          args="$args extra_cflags_cc=[\"-std=c++20\", \"-stdlib=libc++\"]"  # C++文件使用C++20+libc++
+          ```
           
           ## 🛠️ 编译器和标准
           
           ### 🔧 使用的编译器版本
-          - **Windows**: MSVC 2022 + **C++20标准**
-          - **macOS**: **Clang 18**（强制指定版本） + **C++20标准** + libc++
-          - **Linux**: GCC 13 + **C++20标准**  
-          - **Android**: Clang 18 (NDK r25c) + **C++20标准**
-          
-          ### 🍎 macOS Clang 18特殊配置
-          - 通过Homebrew强制安装`llvm@18`或`llvm`包
-          - 自动检测架构（Apple Silicon vs Intel Mac）
-          - 设置正确的安装路径和环境变量
-          - 优先级设置确保使用Clang 18而非系统默认Clang 15
-          - 完整的编译器验证和回退机制
+          - **Windows**: MSVC 2022 + **默认C标准** + **C++20标准**
+          - **macOS**: **Clang 18** + **默认C标准+libc++** + **C++20标准+libc++**
+          - **Linux**: GCC 13 + **默认C标准** + **C++20标准**  
+          - **Android**: Clang 18 (NDK r25c) + **默认C标准** + **C++20标准**
           
           ### ✨ 现代C++20特性支持
           - **C++20标准**（Dawn WebGPU要求）
           - 概念(Concepts)和约束(Constraints)  
           - 协程(Coroutines)完整支持
           - 范围(Ranges)库完整支持
-          - 格式化库(std::format)
-          - 三路比较运算符(<=>)
-          - 结构化绑定增强
-          - 链接时优化(LTO)
-          
-          ## 🚀 三重GPU后端架构
-          
-          ### 🎯 完整GPU后端支持
-          - **Ganesh** - 传统稳定GPU渲染后端，生产环境验证
-          - **Graphite** - 现代化高性能GPU渲染后端，优化管线
-          - **Dawn WebGPU** - 跨平台WebGPU标准实现，面向未来（需要C++20）
-          
-          ## 🏗️ 支持的平台
-          
-          ### 桌面平台
-          - **Windows x64** (`Win/x64`)
-            - 编译器: **MSVC 2022** + C++20
-            - GPU后端: **Direct3D 11/12** + OpenGL + Vulkan + 三重GPU后端
-            - 特性: UTF-8编码，严格标准符合性
-          
-          - **macOS Intel x64** (`macOS/x64`)
-          - **macOS Apple Silicon ARM64** (`macOS/arm64`)
-            - 编译器: **Clang 18**（强制指定版本） + C++20 + libc++
-            - GPU后端: **Metal** + OpenGL + Vulkan + 三重GPU后端
-            - 特性: 完整DNG RAW支持，彩色诊断，覆盖Dawn默认设置
-          
-          - **Linux x64** (`Linux/x64`)
-            - 编译器: **GCC 13** + C++20
-            - GPU后端: OpenGL + Vulkan + 三重GPU后端
-
-          
+          - 格式化库(std::format
