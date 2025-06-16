@@ -158,18 +158,58 @@ jobs:
       run: |
         # 安装Xcode命令行工具
         xcode-select --install 2>/dev/null || true
+        
         # 安装ninja构建工具
         brew install ninja || true
         
-        # 检查Xcode版本并设置Clang路径
-        xcodebuild -version
-        
-        # macOS通常自带较新版本的Clang，检查版本
+        # 检查当前系统的Clang版本
+        echo "系统默认Clang版本："
         clang --version
         
-        # 如果需要特定版本的Clang，可以通过Homebrew安装
-        # brew install llvm
-        # echo "/opt/homebrew/opt/llvm/bin" >> $GITHUB_PATH
+        # 通过Homebrew安装LLVM 18（包含Clang 18）
+        echo "正在安装Clang 18..."
+        brew install llvm@18 || brew install llvm
+        
+        # 设置Clang 18的路径
+        # 根据macOS架构选择正确的路径
+        if [[ $(uname -m) == "arm64" ]]; then
+          # Apple Silicon (M1/M2) 使用 /opt/homebrew 路径
+          LLVM_PATH="/opt/homebrew/opt/llvm"
+          if [ -d "/opt/homebrew/opt/llvm@18" ]; then
+            LLVM_PATH="/opt/homebrew/opt/llvm@18"
+          fi
+        else
+          # Intel Mac 使用 /usr/local 路径
+          LLVM_PATH="/usr/local/opt/llvm"
+          if [ -d "/usr/local/opt/llvm@18" ]; then
+            LLVM_PATH="/usr/local/opt/llvm@18"
+          fi
+        fi
+        
+        # 将Clang 18添加到PATH前面，确保优先使用
+        echo "$LLVM_PATH/bin" >> $GITHUB_PATH
+        
+        # 设置环境变量指向Clang 18
+        echo "CC=$LLVM_PATH/bin/clang" >> $GITHUB_ENV
+        echo "CXX=$LLVM_PATH/bin/clang++" >> $GITHUB_ENV
+        echo "LDFLAGS=-L$LLVM_PATH/lib" >> $GITHUB_ENV
+        echo "CPPFLAGS=-I$LLVM_PATH/include" >> $GITHUB_ENV
+        
+        # 验证安装结果
+        echo "验证Clang 18安装："
+        if [ -f "$LLVM_PATH/bin/clang" ]; then
+          echo "✅ Clang 18安装成功"
+          $LLVM_PATH/bin/clang --version
+          echo "C++编译器版本："
+          $LLVM_PATH/bin/clang++ --version
+        else
+          echo "⚠️ 回退到系统默认Clang"
+          clang --version
+        fi
+        
+        # 检查Xcode版本
+        echo "Xcode版本信息："
+        xcodebuild -version
         
     # 配置Windows MSVC 2022环境
     - name: 配置Windows MSVC 2022环境
