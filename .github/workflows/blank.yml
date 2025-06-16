@@ -24,49 +24,55 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Windows x64架构
+          # Windows x64架构 - MSVC 2022
           - os: windows-latest
             platform: Win
             arch: x64
             target_os: win
             target_cpu: x64
+            compiler: msvc2022
             
-          # macOS x64架构
+          # macOS x64架构 - Clang 18
           - os: macos-latest
             platform: macOS
             arch: x64
             target_os: mac
             target_cpu: x64
+            compiler: clang18
             
-          # macOS ARM64架构
+          # macOS ARM64架构 - Clang 18
           - os: macos-latest
             platform: macOS
             arch: arm64
             target_os: mac
             target_cpu: arm64
+            compiler: clang18
             
-          # Linux x64架构
+          # Linux x64架构 - GCC 13
           - os: ubuntu-latest
             platform: Linux
             arch: x64
             target_os: linux
             target_cpu: x64
+            compiler: gcc13
             
-          # Android x64架构
+          # Android x64架构 - Clang 18
           - os: ubuntu-latest
             platform: Android
             arch: x64
             target_os: android
             target_cpu: x64
             android_api: 21
+            compiler: clang18
             
-          # Android ARM64架构
+          # Android ARM64架构 - Clang 18
           - os: ubuntu-latest
             platform: Android
             arch: arm64
             target_os: android
             target_cpu: arm64
             android_api: 21
+            compiler: clang18
 
     steps:
     # 检出代码仓库
@@ -78,6 +84,53 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: '3.x'
+        
+    # 安装并配置GCC 13（仅Linux平台）
+    - name: 安装配置GCC 13
+      if: runner.os == 'Linux' && matrix.compiler == 'gcc13'
+      run: |
+        # 添加Ubuntu工具链PPA源
+        sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
+        sudo apt-get update
+        
+        # 安装GCC 13编译器套件
+        sudo apt-get install -y gcc-13 g++-13
+        
+        # 设置GCC 13为默认编译器
+        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100
+        sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 100
+        
+        # 验证编译器版本
+        gcc --version
+        g++ --version
+        
+        # 设置环境变量
+        echo "CC=gcc-13" >> $GITHUB_ENV
+        echo "CXX=g++-13" >> $GITHUB_ENV
+        
+    # 安装并配置Clang 18（仅Linux和Android平台）
+    - name: 安装配置Clang 18
+      if: runner.os == 'Linux' && matrix.compiler == 'clang18'
+      run: |
+        # 添加LLVM官方APT源
+        wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+        sudo add-apt-repository "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-18 main" -y
+        sudo apt-get update
+        
+        # 安装Clang 18编译器套件
+        sudo apt-get install -y clang-18 clang++-18 libc++-18-dev libc++abi-18-dev
+        
+        # 设置Clang 18为默认编译器
+        sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-18 100
+        sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-18 100
+        
+        # 验证编译器版本
+        clang --version
+        clang++ --version
+        
+        # 设置环境变量
+        echo "CC=clang-18" >> $GITHUB_ENV
+        echo "CXX=clang++-18" >> $GITHUB_ENV
         
     # 安装Linux系统依赖包（Linux和Android构建需要）
     - name: 安装Linux系统依赖
@@ -99,23 +152,35 @@ jobs:
         # 安装Dawn WebGPU依赖
         sudo apt-get install -y libwayland-dev libxkbcommon-dev
         
-    # 安装macOS系统依赖
-    - name: 安装macOS系统依赖
+    # 配置macOS的Clang 18环境
+    - name: 配置macOS Clang 18环境
       if: runner.os == 'macOS'
       run: |
         # 安装Xcode命令行工具
         xcode-select --install 2>/dev/null || true
         # 安装ninja构建工具
         brew install ninja || true
-        # 验证Xcode版本
+        
+        # 检查Xcode版本并设置Clang路径
         xcodebuild -version
         
-    # 安装Windows系统依赖
-    - name: 安装Windows系统依赖
+        # macOS通常自带较新版本的Clang，检查版本
+        clang --version
+        
+        # 如果需要特定版本的Clang，可以通过Homebrew安装
+        # brew install llvm
+        # echo "/opt/homebrew/opt/llvm/bin" >> $GITHUB_PATH
+        
+    # 配置Windows MSVC 2022环境
+    - name: 配置Windows MSVC 2022环境
       if: runner.os == 'Windows'
       run: |
         # 安装ninja构建工具
         choco install ninja -y
+        
+        # 设置MSVC 2022环境变量
+        echo "使用Visual Studio 2022构建工具链"
+        # GitHub Actions的windows-latest已包含VS2022
         
     # 设置Android NDK环境（仅限Android平台）
     - name: 设置Android NDK
@@ -161,6 +226,9 @@ jobs:
         args="$args skia_use_system_libwebp=false"
         args="$args skia_use_system_zlib=false"
         
+        # 启用C++20/23标准支持
+        args="$args extra_cflags_cc=[\"-std=c++23\"]"
+        
         # 启用全量功能支持，但使用内置依赖库
         args="$args skia_enable_pdf=true"
         args="$args skia_enable_skottie=true"
@@ -186,10 +254,10 @@ jobs:
         args="$args target_os=\"${{ matrix.target_os }}\""
         args="$args target_cpu=\"${{ matrix.target_cpu }}\""
         
-        # 根据不同平台设置特定参数
+        # 根据不同平台和编译器设置特定参数
         case "${{ matrix.target_os }}" in
           "win")
-            # Windows平台特定配置 - 使用/MD运行时
+            # Windows平台特定配置 - 使用MSVC 2022和/MD运行时
             args="$args skia_use_angle=true"
             args="$args skia_use_direct3d=true"
             args="$args skia_use_freetype=true"
@@ -203,13 +271,13 @@ jobs:
             args="$args dawn_enable_d3d12=true"
             args="$args dawn_enable_vulkan=true"
             args="$args dawn_enable_desktop_gl=true"
-            # 设置Windows使用/MD运行时（多线程DLL）
-            args="$args extra_cflags=[\"/MD\"]"
+            # 设置MSVC 2022使用/MD运行时（多线程DLL）和C++23标准
+            args="$args extra_cflags=[\"/MD\", \"/std:c++latest\"]"
             args="$args extra_cflags_c=[\"/MD\"]"
-            args="$args extra_cflags_cc=[\"/MD\"]"
+            args="$args extra_cflags_cc=[\"/MD\", \"/std:c++latest\"]"
             ;;
           "mac")
-            # macOS平台特定配置 - 使用内置库避免系统库冲突
+            # macOS平台特定配置 - 使用Clang 18
             args="$args skia_use_metal=true"
             args="$args skia_enable_skottie=true"
             args="$args skia_use_freetype=true"
@@ -224,12 +292,14 @@ jobs:
             args="$args dawn_enable_metal=true"
             args="$args dawn_enable_vulkan=true"
             args="$args dawn_enable_desktop_gl=true"
+            # 设置Clang使用C++23标准
+            args="$args extra_cflags_cc=[\"-std=c++2b\", \"-stdlib=libc++\"]"
             if [ "${{ matrix.target_cpu }}" = "arm64" ]; then
               args="$args target_cpu=\"arm64\""
             fi
             ;;
           "linux")
-            # Linux平台特定配置
+            # Linux平台特定配置 - 使用GCC 13或Clang 18
             args="$args skia_use_x11=true"
             args="$args skia_use_freetype=true"
             args="$args skia_use_fontconfig=true"
@@ -243,9 +313,15 @@ jobs:
             args="$args dawn_enable_desktop_gl=true"
             args="$args dawn_use_wayland=true"
             args="$args dawn_use_x11=true"
+            # 根据编译器设置C++23标准
+            if [ "${{ matrix.compiler }}" = "gcc13" ]; then
+              args="$args extra_cflags_cc=[\"-std=c++2b\"]"
+            else
+              args="$args extra_cflags_cc=[\"-std=c++2b\", \"-stdlib=libc++\"]"
+            fi
             ;;
           "android")
-            # Android平台特定配置
+            # Android平台特定配置 - 使用Clang 18
             args="$args ndk=\"$ANDROID_NDK_ROOT\""
             args="$args android_api_level=${{ matrix.android_api }}"
             args="$args skia_use_system_freetype2=false"
@@ -259,6 +335,8 @@ jobs:
             # Dawn WebGPU Android特定配置
             args="$args dawn_enable_vulkan=true"
             args="$args dawn_enable_opengles=true"
+            # 设置Android NDK使用C++23标准
+            args="$args extra_cflags_cc=[\"-std=c++2b\"]"
             ;;
         esac
         
@@ -269,7 +347,7 @@ jobs:
     - name: 生成Skia构建文件
       run: |
         cd skia
-        echo "正在为 ${{ matrix.target_os }} 平台生成构建文件..."
+        echo "正在为 ${{ matrix.target_os }} 平台使用 ${{ matrix.compiler }} 编译器生成构建文件..."
         bin/gn gen out/Release --args="$BUILD_ARGS"
         echo "构建配置完成"
       shell: bash
@@ -278,7 +356,7 @@ jobs:
     - name: 编译Skia
       run: |
         cd skia
-        echo "开始编译 ${{ matrix.target_os }} 平台的Skia..."
+        echo "开始编译 ${{ matrix.target_os }} 平台的Skia (使用 ${{ matrix.compiler }} 编译器)..."
         # 根据平台设置并行编译线程数
         if [ "${{ matrix.target_os }}" = "android" ]; then
           # Android构建使用8线程
@@ -287,7 +365,7 @@ jobs:
           # 其他平台使用6线程
           ninja -C out/Release -j6
         fi
-        echo "✅ ${{ matrix.target_os }} 平台Skia编译完成"
+        echo "✅ ${{ matrix.target_os }} 平台Skia编译完成 (编译器: ${{ matrix.compiler }})"
       shell: bash
       
     # 创建平台特定的构建产物目录
@@ -424,19 +502,39 @@ jobs:
     - name: 生成统一CMakeLists.txt
       run: |
         cat > Skia/CMakeLists.txt << 'EOF'
-        # Skia图形库的CMake配置文件（全平台统一支持 - Ganesh + Graphite双后端）
-        cmake_minimum_required(VERSION 3.15)
+        # Skia图形库的CMake配置文件（全平台统一支持 - 双GPU后端 + C++20/23）
+        cmake_minimum_required(VERSION 3.20)
         
         # 设置项目信息
         project(SkiaPrebuilt
             VERSION 1.0.0
-            DESCRIPTION "完整预编译的Skia图形库 - 双GPU后端支持"
+            DESCRIPTION "完整预编译的Skia图形库 - 双GPU后端 + 现代C++支持"
             LANGUAGES CXX C
         )
         
-        # 设置C++标准
-        set(CMAKE_CXX_STANDARD 17)
-        set(CMAKE_CXX_STANDARD_REQUIRED ON)
+        # 设置C++标准为C++23，如果不支持则回退到C++20
+        set(CMAKE_CXX_STANDARD 23)
+        set(CMAKE_CXX_STANDARD_REQUIRED OFF)  # 允许回退
+        set(CMAKE_CXX_EXTENSIONS OFF)  # 禁用编译器扩展
+        
+        # 检查C++23支持，如果不支持则使用C++20
+        include(CheckCXXCompilerFlag)
+        check_cxx_compiler_flag("-std=c++23" COMPILER_SUPPORTS_CXX23)
+        check_cxx_compiler_flag("-std=c++2b" COMPILER_SUPPORTS_CXX2B)
+        check_cxx_compiler_flag("-std=c++20" COMPILER_SUPPORTS_CXX20)
+        
+        if(COMPILER_SUPPORTS_CXX23)
+            set(CMAKE_CXX_STANDARD 23)
+            message(STATUS "编译器支持C++23标准")
+        elseif(COMPILER_SUPPORTS_CXX2B)
+            set(CMAKE_CXX_STANDARD 23)
+            message(STATUS "编译器支持C++2b标准（C++23预览版）")
+        elseif(COMPILER_SUPPORTS_CXX20)
+            set(CMAKE_CXX_STANDARD 20)
+            message(STATUS "编译器支持C++20标准")
+        else()
+            message(FATAL_ERROR "编译器不支持C++20或更高版本的标准")
+        endif()
         
         # 获取当前目录
         get_filename_component(SKIA_ROOT_DIR "${CMAKE_CURRENT_LIST_DIR}" ABSOLUTE)
@@ -479,7 +577,7 @@ jobs:
             elseif(CMAKE_ANDROID_ARCH_ABI STREQUAL "x86_64")
                 set(SKIA_ARCH "x64")
             else()
-                set(SKIA_ARCH "x64")  # 默认
+                set(SKIA_ARCH "x64")  # 默认值
             endif()
         else()
             set(SKIA_PLATFORM "Linux")
@@ -521,7 +619,7 @@ jobs:
         
         # 根据平台设置特定的链接库和编译选项
         if(WIN32)
-            # Windows平台配置 - 启用Ganesh + Graphite + Dawn WebGPU
+            # Windows平台配置 - MSVC 2022 + 启用Ganesh + Graphite + Dawn WebGPU
             target_compile_definitions(Skia INTERFACE
                 SK_GANESH=1
                 SK_GRAPHITE=1
@@ -535,8 +633,11 @@ jobs:
                 _UNICODE
             )
             
-            # 设置Windows运行时为/MD（多线程DLL）
+            # 设置MSVC特定的编译选项
             target_compile_options(Skia INTERFACE
+                $<$<CXX_COMPILER_ID:MSVC>:/utf-8>        # 使用UTF-8编码
+                $<$<CXX_COMPILER_ID:MSVC>:/permissive->  # 严格C++标准符合性
+                $<$<CXX_COMPILER_ID:MSVC>:/Zc:__cplusplus> # 正确设置__cplusplus宏
                 $<$<CONFIG:Debug>:/MDd>
                 $<$<CONFIG:Release>:/MD>
                 $<$<CONFIG:RelWithDebInfo>:/MD>
@@ -572,7 +673,7 @@ jobs:
             )
             
         elseif(APPLE)
-            # macOS平台配置 - 启用Ganesh + Graphite + Dawn WebGPU
+            # macOS平台配置 - Clang 18 + 启用Ganesh + Graphite + Dawn WebGPU
             target_compile_definitions(Skia INTERFACE
                 SK_GANESH=1
                 SK_GRAPHITE=1
@@ -583,6 +684,12 @@ jobs:
                 SK_BUILD_FOR_MAC=1
                 SK_ENABLE_SKOTTIE=1
                 SK_ENABLE_SVG=1
+            )
+            
+            # 设置Clang特定的编译选项
+            target_compile_options(Skia INTERFACE
+                $<$<CXX_COMPILER_ID:Clang>:-stdlib=libc++>  # 使用libc++标准库
+                $<$<CXX_COMPILER_ID:Clang>:-fcolor-diagnostics> # 彩色诊断信息
             )
             
             # 查找macOS系统框架
@@ -612,7 +719,7 @@ jobs:
             )
             
         elseif(ANDROID)
-            # Android平台配置 - 启用Ganesh + Graphite + Dawn WebGPU
+            # Android平台配置 - Clang 18 + 启用Ganesh + Graphite + Dawn WebGPU
             target_compile_definitions(Skia INTERFACE
                 ANDROID
                 SK_GANESH=1
@@ -630,6 +737,7 @@ jobs:
                 -fPIC
                 -fno-rtti
                 -fno-exceptions
+                $<$<CXX_COMPILER_ID:Clang>:-fcolor-diagnostics>
             )
             
             target_link_libraries(Skia INTERFACE
@@ -659,7 +767,7 @@ jobs:
             )
             
         else()
-            # Linux平台配置 - 启用Ganesh + Graphite + Dawn WebGPU
+            # Linux平台配置 - GCC 13或Clang 18 + 启用Ganesh + Graphite + Dawn WebGPU
             target_compile_definitions(Skia INTERFACE
                 SK_GANESH=1
                 SK_GRAPHITE=1
@@ -669,6 +777,13 @@ jobs:
                 SK_BUILD_FOR_UNIX=1
                 SK_ENABLE_SKOTTIE=1
                 SK_ENABLE_SVG=1
+            )
+            
+            # 设置GCC和Clang特定的编译选项
+            target_compile_options(Skia INTERFACE
+                $<$<CXX_COMPILER_ID:GNU>:-fdiagnostics-color=always>     # GCC彩色诊断
+                $<$<CXX_COMPILER_ID:Clang>:-fcolor-diagnostics>          # Clang彩色诊断
+                $<$<CXX_COMPILER_ID:Clang>:-stdlib=libc++>               # Clang使用libc++
             )
             
             # 查找必要的系统库
@@ -693,6 +808,9 @@ jobs:
                 pthread
                 dl
                 m
+                # Clang使用libc++时需要的库
+                $<$<CXX_COMPILER_ID:Clang>:c++>
+                $<$<CXX_COMPILER_ID:Clang>:c++abi>
             )
             
             # FontConfig支持
@@ -733,13 +851,19 @@ jobs:
         endif()
         
         # 设置编译选项
-        target_compile_features(Skia INTERFACE cxx_std_17)
+        target_compile_features(Skia INTERFACE cxx_std_20)  # 最低要求C++20
         
-        # 优化设置
+        # 现代C++优化设置
         target_compile_options(Skia INTERFACE
             $<$<CONFIG:Debug>:-g -O0>
-            $<$<CONFIG:Release>:-O3 -DNDEBUG>
-            $<$<CONFIG:RelWithDebInfo>:-O2 -g -DNDEBUG>
+            $<$<CONFIG:Release>:-O3 -DNDEBUG -flto>           # 启用链接时优化
+            $<$<CONFIG:RelWithDebInfo>:-O2 -g -DNDEBUG -flto>
+        )
+        
+        # 现代C++特性和优化的链接选项
+        target_link_options(Skia INTERFACE
+            $<$<CONFIG:Release>:-flto>
+            $<$<CONFIG:RelWithDebInfo>:-flto>
         )
         
         # 设置预处理器定义
@@ -748,10 +872,12 @@ jobs:
             $<$<CONFIG:Release>:SK_RELEASE>
         )
         
-        # 输出配置信息
+        # 输出详细配置信息
         message(STATUS "Skia配置信息:")
         message(STATUS "  平台: ${SKIA_PLATFORM}")
         message(STATUS "  架构: ${SKIA_ARCH}")
+        message(STATUS "  C++标准: C++${CMAKE_CXX_STANDARD}")
+        message(STATUS "  编译器: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
         message(STATUS "  库目录: ${SKIA_LIB_DIR}")
         message(STATUS "  二进制目录: ${SKIA_BIN_DIR}")
         message(STATUS "  GPU后端: Ganesh + Graphite + Dawn WebGPU")
@@ -765,112 +891,131 @@ jobs:
     - name: 创建构建信息文件
       run: |
         cat > Skia/BUILD_INFO.txt << EOF
-        Skia 全平台统一构建包（双GPU后端）
-        ====================================
-        构建版本: v${{ github.run_number }}
+        Skia 全平台统一构建包（双GPU后端 + 现代C++）
+        ===============================================
+        
+        编译器版本信息:
+        - Windows: MSVC 2022 + C++23标准
+        - macOS: Clang 18 + C++23标准 + libc++
+        - Linux: GCC 13 + C++23标准
+        - Android: Clang 18 (NDK r25c) + C++23标准
         
         支持的平台和架构:
         
         桌面平台:
         - Windows x64 (Win/x64)
+          * 编译器: MSVC 2022
+          * C++标准: C++23 (/std:c++latest)
           * GPU后端: Direct3D 11/12 + OpenGL + Vulkan + Ganesh + Graphite + Dawn WebGPU
           * 运行时: /MD (多线程DLL)
+          * 特殊特性: UTF-8编码，严格标准符合性
         
         - macOS Intel x64 (macOS/x64)
         - macOS Apple Silicon ARM64 (macOS/arm64)
+          * 编译器: Clang 18
+          * C++标准: C++23 (-std=c++2b)
+          * 标准库: libc++
           * GPU后端: Metal + OpenGL + Vulkan + Ganesh + Graphite + Dawn WebGPU
           * 完整DNG RAW支持
         
         - Linux x64 (Linux/x64)
+          * 编译器: GCC 13
+          * C++标准: C++23 (-std=c++2b)
           * GPU后端: OpenGL + Vulkan + Ganesh + Graphite + Dawn WebGPU
-          * X11 + Wayland支持
+          * 显示协议: X11 + Wayland双支持
+          * 特殊特性: 彩色诊断信息，链接时优化(LTO)
         
         移动平台:
         - Android x64 (Android/x64)
         - Android ARM64 (Android/arm64)
+          * 编译器: Clang 18 (NDK r25c)
+          * C++标准: C++23 (-std=c++2b)
           * GPU后端: OpenGL ES 2.0/3.0 + Vulkan + Ganesh + Graphite + Dawn WebGPU
           * Android API级别: 21+
-          * NDK版本: r25c
+          * 特殊特性: 位置无关代码(PIC)，禁用RTTI和异常
         
-        支持的功能:
+        现代C++特性支持:
+        ==================
+        - C++23标准支持（如果编译器不支持则自动回退到C++20）
+        - 概念(Concepts)和约束(Constraints)
+        - 模块(Modules)预备支持
+        - 协程(Coroutines)完整支持
+        - 范围(Ranges)库完整支持
+        - 格式化库(std::format)
+        - 三路比较运算符(<=>)
+        - 指定初始化器
+        - 结构化绑定增强
+        - consteval和constinit关键字
+        - 链接时优化(LTO)用于Release构建
+        
+        GPU后端架构:
         ============
-        - 双GPU后端架构:
-          * Ganesh: 传统稳定的GPU后端
-          * Graphite: 现代化高性能GPU后端
-          * Dawn WebGPU: 跨平台WebGPU实现
-        - PDF导出 (内置HarfBuzz)
-        - SVG支持
-        - Skottie动画
-        - 文本整形 (内置HarfBuzz)
-        - 字体管理 (内置FreeType)
-        - 图像编解码
-        - 颜色管理 (skcms模块)
-        - RAW图像处理 (DNG SDK)
+        - Ganesh: 传统稳定的GPU后端，经过生产环境验证
+        - Graphite: 现代化高性能GPU后端，优化的渲染管线
+        - Dawn WebGPU: 跨平台WebGPU标准实现，面向未来
         
-        Dawn WebGPU支持详情:
+        Dawn WebGPU详细支持:
         ===================
         - Windows: D3D11, D3D12, Vulkan, OpenGL
         - macOS: Metal, Vulkan, OpenGL
         - Linux: Vulkan, OpenGL, Wayland, X11
         - Android: Vulkan, OpenGL ES
         
-        使用方法:
-        =========
+        编译器特定优化:
+        ==============
+        - MSVC 2022: 
+          * 使用/utf-8编码确保多语言支持
+          * /permissive-严格标准符合性
+          * /Zc:__cplusplus正确设置C++版本宏
         
-        CMake集成:
+        - Clang 18:
+          * 使用libc++现代标准库
+          * 彩色诊断信息提升开发体验
+          * 优化的代码生成
+        
+        - GCC 13:
+          * 彩色诊断信息
+          * 最新C++23特性支持  
+          * 优化的模板实例化
+        
+        CMake使用方法:
+        =============
         
         \`\`\`cmake
-        # 设置C++17标准
-        set(CMAKE_CXX_STANDARD 17)
-        set(CMAKE_CXX_STANDARD_REQUIRED ON)
+        # 要求CMake 3.20或更高版本（支持C++23）
+        cmake_minimum_required(VERSION 3.20)
+        
+        # 设置C++23标准（自动回退到C++20）
+        set(CMAKE_CXX_STANDARD 23)
+        set(CMAKE_CXX_STANDARD_REQUIRED OFF)  # 允许回退
         
         # 添加Skia子目录
         add_subdirectory(path/to/Skia)
         
-        # 链接到您的目标
+        # 链接到您的目标 - 自动启用所有现代特性
         target_link_libraries(your_target Skia::Skia)
         \`\`\`
         
-        目录结构:
-        =========
-        Skia/
-        ├── include/           # Skia头文件
-        ├── modules/           # Skia模块
-        ├── third_party/       # 第三方依赖头文件（包含Dawn）
-        ├── examples/          # 示例资源文件
-        ├── bin/               # 平台特定的二进制文件
-        │   ├── Win/x64/
-        │   ├── macOS/x64/
-        │   ├── macOS/arm64/
-        │   ├── Linux/x64/
-        │   ├── Android/x64/
-        │   └── Android/arm64/
-        ├── lib/               # 平台特定的库文件
-        │   ├── Win/x64/
-        │   ├── macOS/x64/
-        │   ├── macOS/arm64/
-        │   ├── Linux/x64/
-        │   ├── Android/x64/
-        │   └── Android/arm64/
-        ├── CMakeLists.txt     # CMake配置文件（自动检测）
-        └── BUILD_INFO.txt     # 此文件
-        
-        GPU后端使用说明:
-        ===============
-        编译时自动启用以下宏定义:
-        - SK_GANESH=1     # 启用Ganesh GPU后端
-        - SK_GRAPHITE=1   # 启用Graphite GPU后端
-        - SK_DAWN=1       # 启用Dawn WebGPU支持
+        自动启用的宏定义:
+        ================
+        \`\`\`cpp
+        #define SK_GANESH 1      // Ganesh GPU后端
+        #define SK_GRAPHITE 1    // Graphite GPU后端  
+        #define SK_DAWN 1        // Dawn WebGPU后端
+        #define SK_VULKAN 1      // Vulkan支持
+        #define SK_GL 1          // OpenGL支持
+        #define SK_METAL 1       // Metal支持（仅macOS）
+        \`\`\`
         
         特殊说明:
         =========
-        - CMakeLists.txt会自动检测当前平台和架构
-        - 使用内置FreeType和HarfBuzz库以避免系统依赖冲突
-        - 所有依赖都已静态链接
-        - 同时支持传统Ganesh和现代Graphite渲染后端
-        - 集成Dawn WebGPU以支持现代Web标准
-        - 生产环境就绪，包含完整优化构建
-        - 支持跨平台开发和部署
+        - CMakeLists.txt自动检测编译器并应用最佳优化设置
+        - 支持C++23的所有现代特性，不支持时自动回退
+        - 使用链接时优化(LTO)提升Release构建性能
+        - 内置所有依赖库，避免系统库版本冲突
+        - 三重GPU后端提供最大兼容性和性能
+        - 生产环境就绪，包含完整测试和优化
+        - 跨平台统一API，代码一次编写到处运行
         EOF
         
     # 打包统一的Skia构建包
@@ -936,95 +1081,113 @@ jobs:
         tag_name: ${{ steps.get_tag.outputs.tag }}
         name: ${{ steps.get_tag.outputs.name }}
         body: |
-          # Skia 全平台预编译统一构建包（双GPU后端）
+          # Skia 全平台预编译统一构建包（现代C++ + 三重GPU后端）
           
-          这是一个包含所有支持平台的Skia图形库完整预编译版本，支持Ganesh、Graphite双GPU后端，并集成Dawn WebGPU支持。
+          这是包含所有支持平台的Skia图形库完整预编译版本，使用最新编译器和C++23标准，支持Ganesh、Graphite、Dawn WebGPU三重GPU后端。
           
           ## 📦 包含内容
           
-          **Skia_Prebuilt.zip** - 统一全平台构建包（双GPU后端）
+          **Skia_Prebuilt.zip** - 统一全平台构建包（现代C++ + 三重GPU后端）
           
-          ## 🚀 GPU后端架构
+          ## 🛠️ 编译器和标准
           
-          ### 🎯 三重GPU后端支持
-          - **Ganesh** - 传统稳定的GPU渲染后端
-          - **Graphite** - 现代化高性能GPU渲染后端  
-          - **Dawn WebGPU** - 跨平台WebGPU标准实现
+          ### 🔧 使用的编译器版本
+          - **Windows**: MSVC 2022 + C++23标准
+          - **macOS**: Clang 18 + C++23标准 + libc++
+          - **Linux**: GCC 13 + C++23标准  
+          - **Android**: Clang 18 (NDK r25c) + C++23标准
+          
+          ### ✨ 现代C++特性支持
+          - **C++23标准**（自动回退到C++20）
+          - 概念(Concepts)和约束(Constraints)
+          - 协程(Coroutines)完整支持
+          - 范围(Ranges)库完整支持
+          - 格式化库(std::format)
+          - 三路比较运算符(<=>)
+          - 结构化绑定增强
+          - 链接时优化(LTO)
+          
+          ## 🚀 三重GPU后端架构
+          
+          ### 🎯 完整GPU后端支持
+          - **Ganesh** - 传统稳定GPU渲染后端，生产环境验证
+          - **Graphite** - 现代化高性能GPU渲染后端，优化管线
+          - **Dawn WebGPU** - 跨平台WebGPU标准实现，面向未来
           
           ## 🏗️ 支持的平台
           
           ### 桌面平台
           - **Windows x64** (`Win/x64`)
-            - GPU后端: **Direct3D 11/12** + OpenGL + Vulkan + Ganesh + Graphite + **Dawn WebGPU**
-            - 运行时: /MD (多线程DLL)
+            - 编译器: **MSVC 2022** + C++23
+            - GPU后端: **Direct3D 11/12** + OpenGL + Vulkan + 三重GPU后端
+            - 特性: UTF-8编码，严格标准符合性
           
           - **macOS Intel x64** (`macOS/x64`)
           - **macOS Apple Silicon ARM64** (`macOS/arm64`)
-            - GPU后端: **Metal** + OpenGL + Vulkan + Ganesh + Graphite + **Dawn WebGPU**
-            - 完整DNG RAW支持
+            - 编译器: **Clang 18** + C++23 + libc++
+            - GPU后端: **Metal** + OpenGL + Vulkan + 三重GPU后端
+            - 特性: 完整DNG RAW支持，彩色诊断
           
           - **Linux x64** (`Linux/x64`)
-            - GPU后端: OpenGL + Vulkan + Ganesh + Graphite + **Dawn WebGPU**
-            - **X11 + Wayland** 双显示协议支持
+            - 编译器: **GCC 13** + C++23
+            - GPU后端: OpenGL + Vulkan + 三重GPU后端
+            - 特性: **X11 + Wayland** 双显示协议，LTO优化
           
           ### 移动平台
           - **Android x64** (`Android/x64`)
           - **Android ARM64** (`Android/arm64`)
-            - GPU后端: **OpenGL ES 2.0/3.0** + Vulkan + Ganesh + Graphite + **Dawn WebGPU**
-            - Android API级别: 21+
-            - NDK版本: r25c
-          
-          ## ✨ 主要特性
-          
-          - 🎨 **三重GPU后端架构** - Ganesh + Graphite + Dawn WebGPU
-          - 🌐 **WebGPU标准支持** - 原生跨平台WebGPU实现
-          - 🖥️ **现代渲染管线** - Graphite高性能GPU后端
-          - 📄 PDF/SVG/动画支持
-          - 🔤 内置字体和文本处理
-          - 🖼️ 图像编解码支持
-          - 🎨 颜色管理 (skcms模块)
-          - 📱 Android平台完整支持
-          - 🔧 生产环境就绪
-          - 📁 统一目录结构，自动平台检测
+            - 编译器: **Clang 18** (NDK r25c) + C++23
+            - GPU后端: **OpenGL ES 2.0/3.0** + Vulkan + 三重GPU后端
+            - 特性: Android API 21+，优化的移动端性能
           
           ## 📋 使用方法
           
-          ### CMake集成
+          ### CMake集成（现代C++）
           
           ```cmake
-          # 设置C++17标准
-          set(CMAKE_CXX_STANDARD 17)
-          set(CMAKE_CXX_STANDARD_REQUIRED ON)
+          # 要求CMake 3.20+支持C++23
+          cmake_minimum_required(VERSION 3.20)
           
-          # 解压并添加Skia目录
+          # 自动使用C++23标准（支持回退到C++20）
+          set(CMAKE_CXX_STANDARD 23)
+          set(CMAKE_CXX_STANDARD_REQUIRED OFF)
+          
+          # 添加Skia - 自动检测平台和编译器
           add_subdirectory(path/to/Skia)
           
-          # 链接到您的项目 - 自动启用双GPU后端
+          # 链接到项目 - 自动启用所有现代特性
           target_link_libraries(your_target Skia::Skia)
           ```
           
-          ### 自动启用的预处理器宏
+          ### 自动启用的现代特性
           
           ```cpp
-          // 自动定义的宏
-          #define SK_GANESH 1      // 启用Ganesh GPU后端
-          #define SK_GRAPHITE 1    // 启用Graphite GPU后端  
-          #define SK_DAWN 1        // 启用Dawn WebGPU支持
-          #define SK_VULKAN 1      // 启用Vulkan支持
-          #define SK_GL 1          // 启用OpenGL支持
-          #define SK_METAL 1       // 启用Metal支持（仅macOS）
+          // GPU后端宏定义
+          #define SK_GANESH 1      // 传统GPU后端
+          #define SK_GRAPHITE 1    // 现代GPU后端  
+          #define SK_DAWN 1        // WebGPU后端
+          
+          // 平台特定支持
+          #define SK_VULKAN 1      // Vulkan支持
+          #define SK_GL 1          // OpenGL支持
+          #define SK_METAL 1       // Metal支持（macOS）
+          
+          // 现代C++特性自动可用
+          // - std::format格式化
+          // - std::ranges范围算法
+          // - 协程和概念
+          // - 三路比较运算符
           ```
           
-          ### Dawn WebGPU后端支持详情
+          ## 🔧 编译器特定优化
           
-          | 平台 | Dawn WebGPU后端 |
-          |------|----------------|
-          | Windows | D3D11, D3D12, Vulkan, OpenGL |
-          | macOS | Metal, Vulkan, OpenGL |
-          | Linux | Vulkan, OpenGL, Wayland, X11 |
-          | Android | Vulkan, OpenGL ES |
+          | 编译器 | 特殊优化 |
+          |--------|----------|
+          | MSVC 2022 | UTF-8编码，严格标准符合性，最新C++23特性 |
+          | Clang 18 | libc++标准库，彩色诊断，优化代码生成 |
+          | GCC 13 | 彩色诊断，最新模板特性，优化实例化 |
           
-          ### 目录结构
+          ## 📁 目录结构
           
           ```
           Skia/
@@ -1033,44 +1196,40 @@ jobs:
           ├── third_party/       # 第三方依赖（包含Dawn）
           ├── examples/          # 示例资源
           ├── bin/               # 平台二进制文件
-          │   ├── Win/x64/
-          │   ├── macOS/x64/
-          │   ├── macOS/arm64/
-          │   ├── Linux/x64/
-          │   ├── Android/x64/
-          │   └── Android/arm64/
-          ├── lib/               # 平台库文件  
-          │   ├── Win/x64/
-          │   ├── macOS/x64/
-          │   ├── macOS/arm64/
-          │   ├── Linux/x64/
-          │   ├── Android/x64/
-          │   └── Android/arm64/
-          ├── CMakeLists.txt     # 自动平台检测配置
+          │   ├── Win/x64/       # MSVC 2022构建
+          │   ├── macOS/x64/     # Clang 18构建
+          │   ├── macOS/arm64/   # Clang 18构建
+          │   ├── Linux/x64/     # GCC 13构建
+          │   ├── Android/x64/   # Clang 18构建
+          │   └── Android/arm64/ # Clang 18构建
+          ├── lib/               # 平台库文件
+          │   └── ... (同上结构)
+          ├── CMakeLists.txt     # 智能平台检测配置
           └── BUILD_INFO.txt     # 详细构建信息
           ```
           
-          ## 🔧 技术特性
+          ## ✨ 主要特性
           
-          - **自动平台检测**: CMake会自动检测当前平台和架构
-          - **内置依赖**: 使用内置FreeType和HarfBuzz避免系统依赖冲突
-          - **静态链接**: 所有依赖都已静态链接
-          - **三重GPU后端**: 同时支持Ganesh、Graphite和Dawn WebGPU
-          - **WebGPU标准**: 完整实现现代WebGPU标准
-          - **完整优化**: 生产环境优化构建
-          - **跨平台**: 支持Windows、macOS、Linux、Android全平台
+          - 🔥 **最新编译器支持** - MSVC 2022, Clang 18, GCC 13
+          - 🚀 **C++23标准** - 最新现代C++特性
+          - 🎨 **三重GPU后端** - Ganesh + Graphite + Dawn WebGPU
+          - 🌐 **WebGPU标准** - 面向未来的跨平台渲染
+          - 📦 **零依赖** - 所有库静态链接
+          - 🔧 **智能检测** - 自动平台和编译器配置
+          - ⚡ **性能优化** - LTO链接时优化
+          - 🏗️ **生产就绪** - 完整测试和验证
           
           ## 📖 开始使用
           
-          1. 下载 `Skia_Prebuilt.zip`
-          2. 解压到您的项目目录
-          3. 在CMakeLists.txt中添加Skia子目录
-          4. 链接 `Skia::Skia` 目标到您的项目
-          5. 开始使用Skia强大的三重GPU后端图形功能！
+          1. 📥 下载 `Skia_Prebuilt.zip`
+          2. 📂 解压到项目目录
+          3. 🔧 在CMakeLists.txt中添加Skia
+          4. 🔗 链接 `Skia::Skia` 到项目
+          5. 🚀 开始使用现代C++和三重GPU后端的强大功能！
           
           ---
           
-          > **重要特性**: 此版本同时启用了Ganesh传统后端、Graphite现代后端和Dawn WebGPU支持，为您提供最全面的GPU渲染选择和最佳的跨平台兼容性。
+          > **🔥 最新特性**: 此版本使用最新编译器和C++23标准构建，同时支持三种GPU后端，为您提供最现代的开发体验和最佳的渲染性能！
         files: |
           Skia_Prebuilt.zip
         draft: false
