@@ -49,7 +49,7 @@ jobs:
             arch: x64
             graphics: vulkan
             compiler: gcc
-          - os: ubuntu-22.04
+          - os: ubuntu-24.04
             platform: linux
             arch: x64
             graphics: opengl
@@ -61,17 +61,17 @@ jobs:
             arch: arm64
             graphics: vulkan
             compiler: clang
-          - os: ubuntu-22.04
+          - os: ubuntu-24.04
             platform: android
             arch: arm64
             graphics: gles
             compiler: clang
-          - os: ubuntu-22.04
+          - os: ubuntu-24.04
             platform: android
             arch: x64
             graphics: vulkan
             compiler: clang
-          - os: ubuntu-22.04
+          - os: ubuntu-24.04
             platform: android
             arch: x64
             graphics: gles
