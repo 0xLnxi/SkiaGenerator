@@ -1,4 +1,4 @@
-# Skia 全平台统一构建工作流（完整收集Dawn gen目录）
+# Skia 全平台统一构建工作流（启用Dawn/Graphite/Ganesh后端，不编译Dawn）
 name: 编译 Skia 全平台统一构建包
 
 on:
@@ -133,8 +133,6 @@ jobs:
         sudo apt-get install -y libicu-dev libharfbuzz-dev
         # 安装Java开发环境（Android构建需要）
         sudo apt-get install -y openjdk-11-jdk
-        # 安装Dawn WebGPU依赖
-        sudo apt-get install -y libwayland-dev libxkbcommon-dev libwayland-egl1-mesa
         
     # 配置Windows MSVC 2022环境
     - name: 配置Windows MSVC 2022环境
@@ -203,7 +201,7 @@ jobs:
         args="$args skia_use_vulkan=true"
         args="$args skia_enable_spirv_validation=false"
         
-        # 启用Graphite后端及Dawn WebGPU支持
+        # 启用Graphite后端及Dawn WebGPU支持（但不编译Dawn）
         args="$args skia_enable_graphite=true"
         args="$args skia_use_dawn=true"
         args="$args skia_use_wgpu=true"
@@ -227,7 +225,7 @@ jobs:
             args="$args skia_use_system_harfbuzz=false"
             args="$args skia_use_dng_sdk=false"
             args="$args skia_use_piex=false"
-            # Dawn WebGPU Windows特定配置
+            # Dawn WebGPU Windows特定配置（但不编译Dawn本身）
             args="$args dawn_enable_d3d11=true"
             args="$args dawn_enable_d3d12=true"
             args="$args dawn_enable_vulkan=true"
@@ -247,7 +245,7 @@ jobs:
             args="$args skia_use_piex=true"
             args="$args skia_use_system_freetype2=true"
             args="$args skia_use_system_harfbuzz=true"
-            # Dawn WebGPU Linux特定配置
+            # Dawn WebGPU Linux特定配置（但不编译Dawn本身）
             args="$args dawn_enable_vulkan=true"
             args="$args dawn_enable_desktop_gl=true"
             args="$args dawn_use_wayland=true"
@@ -275,7 +273,7 @@ jobs:
             args="$args skia_use_system_harfbuzz=false"
             args="$args skia_use_dng_sdk=true"
             args="$args skia_use_piex=true"
-            # Dawn WebGPU Android特定配置
+            # Dawn WebGPU Android特定配置（但不编译Dawn本身）
             args="$args dawn_enable_vulkan=true"
             args="$args dawn_enable_opengles=true"
             # 设置Android编译参数
@@ -334,7 +332,7 @@ jobs:
             # Linux和Android平台文件复制
             echo "复制Linux/Android库文件和可执行文件..."
             find out/Release -name "*.a" -exec cp {} artifacts/lib/${{ matrix.platform }}/${{ matrix.arch }}/ \; 2>/dev/null || true
-            find out/Release -name "*.so" -exec cp {} artifacts/lib/${{ matrix.platform }}/${{ matrix.arch }}/ \; 2>/dev/null || true
+            find out/Release -name "*.so" -exec cp {} artifacts/bin/${{ matrix.platform }}/${{ matrix.arch }}/ \; 2>/dev/null || true
             find out/Release -type f -perm +111 -name "*" -not -name "*.so" -exec cp {} artifacts/bin/${{ matrix.platform }}/${{ matrix.arch }}/ \; 2>/dev/null || true
             ;;
         esac
@@ -350,7 +348,7 @@ jobs:
         path: skia/artifacts/
         retention-days: 30
 
-  # 收集共享头文件（只需要执行一次）
+  # 收集共享头文件（只收集Skia和模块头文件）
   collect-headers:
     runs-on: ubuntu-latest
     
@@ -365,119 +363,31 @@ jobs:
       with:
         python-version: '3.x'
         
-    # 安装Linux依赖（用于编译生成Dawn头文件）
-    - name: 安装Linux依赖
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential ninja-build
-        sudo apt-get install -y libfontconfig1-dev libfreetype6-dev libgl1-mesa-dev
-        sudo apt-get install -y libvulkan-dev vulkan-tools
-        sudo apt-get install -y libx11-dev libx11-xcb-dev libxcb1-dev
-        sudo apt-get install -y libwayland-dev libxkbcommon-dev libwayland-egl1-mesa
-        
     # 获取depot_tools工具集
     - name: 获取depot_tools
       run: |
         git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
         echo "${{ github.workspace }}/depot_tools" >> $GITHUB_PATH
         
-    # 获取Skia源代码（用于生成Dawn头文件）
+    # 获取Skia源代码（仅用于获取头文件）
     - name: 获取Skia源代码
       run: |
         git clone https://skia.googlesource.com/skia.git
         cd skia
         python tools/git-sync-deps
         
-    # 预编译生成Dawn头文件（关键步骤）
-    - name: 预编译生成Dawn头文件
-      run: |
-        cd skia
-        
-        echo "开始预编译生成Dawn WebGPU头文件..."
-        
-        # 配置最小化构建参数以生成Dawn头文件
-        basic_args="is_debug=false"
-        basic_args="$basic_args is_official_build=false"
-        basic_args="$basic_args skia_enable_gpu=true"
-        basic_args="$basic_args skia_enable_graphite=true"
-        basic_args="$basic_args skia_use_dawn=true"
-        basic_args="$basic_args skia_use_wgpu=true"
-        basic_args="$basic_args skia_enable_tools=false"
-        basic_args="$basic_args target_os=\"linux\""
-        basic_args="$basic_args target_cpu=\"x64\""
-        basic_args="$basic_args dawn_enable_vulkan=true"
-        basic_args="$basic_args dawn_enable_desktop_gl=true"
-        basic_args="$basic_args extra_cflags_cc=[\"-std=c++20\"]"
-        basic_args="$basic_args dawn_cxx_standard=\"c++20\""
-        
-        echo "生成GN构建文件..."
-        bin/gn gen out/HeaderGen --args="$basic_args"
-        
-        echo "编译Dawn头文件生成目标..."
-        # 编译Dawn WebGPU相关目标以生成所有必要的头文件
-        ninja -C out/HeaderGen third_party/externals/dawn:webgpu_headers || echo "webgpu_headers目标编译完成或跳过"
-        ninja -C out/HeaderGen third_party/externals/dawn:webgpu_cpp || echo "webgpu_cpp目标编译完成或跳过"
-        ninja -C out/HeaderGen third_party/externals/dawn:dawncpp || echo "dawncpp目标编译完成或跳过"
-        ninja -C out/HeaderGen third_party/externals/dawn/src/dawn:cpp || echo "dawn_cpp目标编译完成或跳过"
-        ninja -C out/HeaderGen third_party/externals/dawn/src/dawn:proc || echo "dawn_proc目标编译完成或跳过"
-        ninja -C out/HeaderGen third_party/externals/dawn/src/dawn/native:webgpu_dawn || echo "webgpu_dawn目标编译完成或跳过"
-        
-        echo "Dawn头文件生成完成"
-        
-    # 收集所有头文件
-    - name: 收集共享头文件
+    # 收集Skia头文件
+    - name: 收集Skia头文件
       run: |
         cd skia
         
         # 创建头文件目录结构
         mkdir -p artifacts/include/include  # Skia头文件目录
-        mkdir -p artifacts/include/dawn     # Dawn WebGPU头文件目录
         mkdir -p artifacts/include/modules  # Skia模块头文件目录
         
         echo "收集Skia头文件..."
         # 复制Skia头文件到include/include目录（保持原有的include目录名）
         cp -r include/* artifacts/include/include/
-        
-        echo "收集Dawn WebGPU原始头文件..."
-        # 复制Dawn WebGPU原始头文件
-        if [ -d "third_party/externals/dawn/include" ]; then
-          echo "复制Dawn原始头文件..."
-          cp -r third_party/externals/dawn/include/* artifacts/include/dawn/ 2>/dev/null || true
-        fi
-        
-        echo "原封不动收集整个gen目录..."
-        # 完整收集gen目录结构 - 原封不动复制整个gen目录
-        if [ -d "out/HeaderGen/gen" ]; then
-          echo "找到gen目录，开始完整收集..."
-          
-          # 创建gen目录
-          mkdir -p artifacts/include/dawn/gen
-          
-          # 原封不动复制整个gen目录
-          cp -r out/HeaderGen/gen/* artifacts/include/dawn/gen/ 2>/dev/null || true
-          
-          echo "gen目录完整复制完成"
-          
-          # 显示gen目录结构
-          echo "gen目录结构预览:"
-          find artifacts/include/dawn/gen -type d | head -20
-          
-          # 检查关键的gen子目录
-          echo "检查关键gen子目录:"
-          [ -d "artifacts/include/dawn/gen/include" ] && echo "✅ gen/include 目录存在" || echo "❌ gen/include 目录缺失"
-          [ -d "artifacts/include/dawn/gen/src" ] && echo "✅ gen/src 目录存在" || echo "❌ gen/src 目录缺失"
-          [ -d "artifacts/include/dawn/gen/webgpu-headers" ] && echo "✅ gen/webgpu-headers 目录存在" || echo "❌ gen/webgpu-headers 目录缺失"
-          
-          # 额外提供扁平化的关键头文件访问
-          echo "提供扁平化的关键头文件访问..."
-          find artifacts/include/dawn/gen -name "webgpu_cpp.h" -exec cp {} artifacts/include/dawn/ \; 2>/dev/null && echo "复制 webgpu_cpp.h 到扁平目录" || true
-          find artifacts/include/dawn/gen -name "webgpu.h" -exec cp {} artifacts/include/dawn/ \; 2>/dev/null && echo "复制 webgpu.h 到扁平目录" || true
-          find artifacts/include/dawn/gen -name "dawn_proc.h" -exec cp {} artifacts/include/dawn/ \; 2>/dev/null && echo "复制 dawn_proc.h 到扁平目录" || true
-          find artifacts/include/dawn/gen -name "dawn_thread_dispatch_proc.h" -exec cp {} artifacts/include/dawn/ \; 2>/dev/null && echo "复制 dawn_thread_dispatch_proc.h 到扁平目录" || true
-          find artifacts/include/dawn/gen -name "dawn_proc_table.h" -exec cp {} artifacts/include/dawn/ \; 2>/dev/null && echo "复制 dawn_proc_table.h 到扁平目录" || true
-        else
-          echo "警告：未找到gen目录，可能Dawn头文件生成失败"
-        fi
         
         echo "收集Skia模块头文件..."
         # 复制modules目录
@@ -485,23 +395,15 @@ jobs:
           cp -r modules/* artifacts/include/modules/ 2>/dev/null || true
         fi
         
-        # 显示最终的Dawn头文件统计
-        echo "=== 最终Dawn头文件统计 ==="
-        dawn_header_count=$(find artifacts/include/dawn -name "*.h" | wc -l)
-        echo "Dawn头文件总数: $dawn_header_count"
+        # 显示收集到的头文件统计
+        echo "=== Skia头文件统计 ==="
+        skia_header_count=$(find artifacts/include/include -name "*.h" | wc -l)
+        echo "Skia头文件总数: $skia_header_count"
         
-        gen_header_count=$(find artifacts/include/dawn/gen -name "*.h" 2>/dev/null | wc -l)
-        echo "Gen目录头文件数: $gen_header_count"
+        module_header_count=$(find artifacts/include/modules -name "*.h" 2>/dev/null | wc -l)
+        echo "模块头文件总数: $module_header_count"
         
-        echo "关键Dawn头文件检查:"
-        [ -f "artifacts/include/dawn/webgpu_cpp.h" ] && echo "✅ webgpu_cpp.h 存在" || echo "❌ webgpu_cpp.h 缺失"
-        [ -f "artifacts/include/dawn/webgpu.h" ] && echo "✅ webgpu.h 存在" || echo "❌ webgpu.h 缺失"
-        [ -f "artifacts/include/dawn/dawn_proc.h" ] && echo "✅ dawn_proc.h 存在" || echo "❌ dawn_proc.h 缺失"
-        
-        echo "Dawn目录结构概览:"
-        find artifacts/include/dawn -type d | head -30
-        
-        echo "✅ 共享头文件收集完成"
+        echo "✅ Skia头文件收集完成"
         
     # 上传共享头文件
     - name: 上传共享头文件
@@ -548,7 +450,7 @@ jobs:
         done
         
         # 复制共享头文件
-        echo "复制共享头文件..."
+        echo "复制Skia头文件..."
         if [ -d "artifacts/shared-headers/include" ]; then
           cp -r artifacts/shared-headers/include Skdn/
         fi
@@ -560,29 +462,22 @@ jobs:
         
         # 显示最终的目录结构
         echo "最终目录结构预览:"
-        find Skdn -type d | head -30
+        find Skdn -type d | head -20
         
-        # 验证Dawn gen目录是否正确复制
-        echo "验证Dawn gen目录:"
-        [ -d "Skdn/include/dawn/gen" ] && echo "✅ Dawn gen目录存在" || echo "❌ Dawn gen目录缺失"
-        [ -d "Skdn/include/dawn/gen/include" ] && echo "✅ gen/include 目录存在" || echo "❌ gen/include 目录缺失"
-        [ -d "Skdn/include/dawn/gen/src" ] && echo "✅ gen/src 目录存在" || echo "❌ gen/src 目录缺失"
-        [ -d "Skdn/include/dawn/gen/webgpu-headers" ] && echo "✅ gen/webgpu-headers 目录存在" || echo "❌ gen/webgpu-headers 目录缺失"
-        
-        dawn_header_count=$(find Skdn/include/dawn -name "*.h" 2>/dev/null | wc -l)
-        echo "最终Dawn头文件总数: $dawn_header_count"
+        skia_header_count=$(find Skdn/include -name "*.h" 2>/dev/null | wc -l)
+        echo "最终Skia头文件总数: $skia_header_count"
         
     # 生成统一的CMakeLists.txt文件
     - name: 生成统一CMakeLists.txt
       run: |
         cat > Skdn/CMakeLists.txt << 'EOF'
-        # Skia + Dawn WebGPU 预编译库的CMake配置文件
+        # Skia 预编译库的CMake配置文件（启用Dawn/Graphite/Ganesh后端）
         cmake_minimum_required(VERSION 3.20)
         
         # 设置项目信息
         project(SkdnPrebuilt
             VERSION 1.0.0
-            DESCRIPTION "完整预编译的Skia图形库集成Dawn WebGPU支持"
+            DESCRIPTION "完整预编译的Skia图形库（启用Dawn/Graphite/Ganesh后端）"
             LANGUAGES CXX C
         )
         
@@ -598,23 +493,13 @@ jobs:
         add_library(Skdn INTERFACE)
         add_library(Skdn::Skdn ALIAS Skdn)
         
-        # 设置共享头文件包含目录（包含完整的gen目录结构）
+        # 设置Skia头文件包含目录
         target_include_directories(Skdn INTERFACE
             $<BUILD_INTERFACE:${SKDN_ROOT_DIR}/include>
-            $<BUILD_INTERFACE:${SKDN_ROOT_DIR}/include/include>        # Skia头文件
-            $<BUILD_INTERFACE:${SKDN_ROOT_DIR}/include/dawn>           # Dawn WebGPU头文件
-            $<BUILD_INTERFACE:${SKDN_ROOT_DIR}/include/dawn/gen>       # Dawn生成文件根目录
-            $<BUILD_INTERFACE:${SKDN_ROOT_DIR}/include/dawn/gen/include>  # Dawn gen/include目录
-            $<BUILD_INTERFACE:${SKDN_ROOT_DIR}/include/dawn/gen/src>      # Dawn gen/src目录
-            $<BUILD_INTERFACE:${SKDN_ROOT_DIR}/include/dawn/gen/webgpu-headers>  # Dawn gen/webgpu-headers目录
-            $<BUILD_INTERFACE:${SKDN_ROOT_DIR}/include/modules>        # Skia模块头文件
+            $<BUILD_INTERFACE:${SKDN_ROOT_DIR}/include/include>   # Skia头文件
+            $<BUILD_INTERFACE:${SKDN_ROOT_DIR}/include/modules>   # Skia模块头文件
             $<INSTALL_INTERFACE:include>
             $<INSTALL_INTERFACE:include/include>
-            $<INSTALL_INTERFACE:include/dawn>
-            $<INSTALL_INTERFACE:include/dawn/gen>
-            $<INSTALL_INTERFACE:include/dawn/gen/include>
-            $<INSTALL_INTERFACE:include/dawn/gen/src>
-            $<INSTALL_INTERFACE:include/dawn/gen/webgpu-headers>
             $<INSTALL_INTERFACE:include/modules>
         )
         
@@ -683,18 +568,10 @@ jobs:
             "${SKDN_LIB_DIR}/*graphite*.lib" 
             "${SKDN_LIB_DIR}/*graphite*.a"
         )
-        file(GLOB SKDN_DAWN_LIBRARIES 
-            "${SKDN_LIB_DIR}/dawn*.lib" 
-            "${SKDN_LIB_DIR}/dawn*.a"
-            "${SKDN_LIB_DIR}/*dawn*.lib" 
-            "${SKDN_LIB_DIR}/*dawn*.a"
-            "${SKDN_LIB_DIR}/webgpu*.lib" 
-            "${SKDN_LIB_DIR}/webgpu*.a"
-        )
         file(GLOB SKDN_OTHER_LIBRARIES "${SKDN_LIB_DIR}/*.lib" "${SKDN_LIB_DIR}/*.a")
         
         # 合并所有库文件
-        set(SKDN_LIBRARIES ${SKDN_SKIA_LIBRARIES} ${SKDN_GRAPHITE_LIBRARIES} ${SKDN_DAWN_LIBRARIES})
+        set(SKDN_LIBRARIES ${SKDN_SKIA_LIBRARIES} ${SKDN_GRAPHITE_LIBRARIES})
         # 添加其他库文件，避免重复
         foreach(lib ${SKDN_OTHER_LIBRARIES})
             list(FIND SKDN_LIBRARIES ${lib} found_index)
@@ -728,7 +605,6 @@ jobs:
                 SK_ENABLE_SVG=1
                 UNICODE
                 _UNICODE
-                WEBGPU_IMPLEMENTATION_DAWN=1
             )
             
             # 设置MSVC特定的编译选项
@@ -795,7 +671,6 @@ jobs:
                 SK_ENABLE_SKOTTIE=1
                 SK_ENABLE_SVG=1
                 __ANDROID_API__=21
-                WEBGPU_IMPLEMENTATION_DAWN=1
             )
             
             target_compile_options(Skdn INTERFACE
@@ -842,7 +717,6 @@ jobs:
                 SK_BUILD_FOR_UNIX=1
                 SK_ENABLE_SKOTTIE=1
                 SK_ENABLE_SVG=1
-                WEBGPU_IMPLEMENTATION_DAWN=1
             )
             
             # 设置GCC和Clang特定的编译选项
@@ -946,8 +820,7 @@ jobs:
         message(STATUS "  库目录: ${SKDN_LIB_DIR}")
         message(STATUS "  二进制目录: ${SKDN_BIN_DIR}")
         message(STATUS "  头文件目录: ${SKDN_ROOT_DIR}/include")
-        message(STATUS "  Dawn gen目录: ${SKDN_ROOT_DIR}/include/dawn/gen")
-        message(STATUS "  GPU后端: Ganesh + Graphite + Dawn WebGPU")
+        message(STATUS "  GPU后端: Ganesh + Graphite + Dawn WebGPU（需要外部Dawn库）")
         
         if(SKDN_LIBRARIES)
             list(LENGTH SKDN_LIBRARIES lib_count)
@@ -961,28 +834,27 @@ jobs:
                 get_filename_component(lib_name "${lib}" NAME)
                 message(STATUS "    Graphite - ${lib_name}")
             endforeach()
-            foreach(lib ${SKDN_DAWN_LIBRARIES})
-                get_filename_component(lib_name "${lib}" NAME)
-                message(STATUS "    Dawn - ${lib_name}")
-            endforeach()
         else()
             message(WARNING "  未找到任何库文件!")
         endif()
+        
+        message(STATUS "注意: 需要在项目中单独链接Dawn WebGPU库")
         EOF
         
     # 创建构建信息文件
     - name: 创建构建信息文件
       run: |
         cat > Skdn/BUILD_INFO.txt << EOF
-        Skia + Dawn WebGPU 全平台预编译库（完整gen目录结构）
-        ========================================================
+        Skia 全平台预编译库（启用Dawn/Graphite/Ganesh后端）
+        ==================================================
         
-        重要更新:
+        重要说明:
         =========
-        ✅ 原封不动收集完整的Dawn gen目录结构
-        ✅ 包含gen/include、gen/src、gen/webgpu-headers等所有子目录
-        ✅ 保持完整的目录层次和文件组织结构
-        ✅ 提供完整的CMake头文件包含路径配置
+        ✅ 启用了Dawn WebGPU后端支持（需要外部Dawn库）
+        ✅ 启用了Graphite现代GPU后端
+        ✅ 启用了Ganesh传统GPU后端
+        ✅ 包含完整的Skia头文件和模块头文件
+        ✅ 未包含Dawn头文件（需要在项目中单独管理）
         
         目录结构:
         =========
@@ -999,53 +871,27 @@ jobs:
         │   └── Android/          # Android 库文件
         │       ├── x64/
         │       └── arm64/
-        ├── include/               # 共享头文件目录
-        │   ├── include/          # Skia头文件（保持原有include目录名）
-        │   ├── dawn/             # Dawn WebGPU头文件目录
-        │   │   ├── gen/          # 完整的Dawn生成文件目录（原封不动）
-        │   │   │   ├── include/  # gen/include目录
-        │   │   │   ├── src/      # gen/src目录
-        │   │   │   └── webgpu-headers/  # gen/webgpu-headers目录
-        │   │   ├── webgpu_cpp.h  # 扁平化访问的关键头文件
-        │   │   ├── dawn_proc.h   # 扁平化访问的关键头文件
-        │   │   └── ...           # 其他Dawn原始头文件
+        ├── include/               # Skia头文件目录
+        │   ├── include/          # Skia核心头文件
         │   └── modules/          # Skia模块头文件
-        ├── CMakeLists.txt         # 智能CMake配置（包含完整gen路径）
+        ├── CMakeLists.txt         # 智能CMake配置
         └── BUILD_INFO.txt         # 构建信息文档
-        
-        Dawn头文件完整说明:
-        ===================
-        现在包含完整的Dawn WebGPU文件结构：
-        
-        原始头文件:
-        - 从third_party/externals/dawn/include复制的源码头文件
-        
-        完整gen目录（原封不动收集）:
-        - gen/include/           # 编译生成的头文件
-        - gen/src/              # 编译生成的源码相关文件
-        - gen/webgpu-headers/   # WebGPU头文件生成内容
-        
-        扁平化访问:
-        - 关键头文件同时复制到dawn/根目录便于直接访问
-        - webgpu_cpp.h、dawn_proc.h等可直接包含
-        
-        CMake头文件包含路径:
-        ===================
-        CMake配置自动包含以下路径：
-        - include/                    # 根include目录
-        - include/include/            # Skia头文件
-        - include/dawn/               # Dawn根目录
-        - include/dawn/gen/           # Dawn gen根目录
-        - include/dawn/gen/include/   # Dawn gen/include目录
-        - include/dawn/gen/src/       # Dawn gen/src目录
-        - include/dawn/gen/webgpu-headers/  # Dawn gen/webgpu-headers目录
-        - include/modules/            # Skia模块目录
         
         构建信息:
         =========
         ✅ Windows x64 - 完全支持（DirectX 11/12 + Vulkan + OpenGL）
         ✅ Linux x64 - 完全支持（Vulkan + OpenGL + X11 + Wayland）
         ✅ Android x64/ARM64 - 完全支持（Vulkan + OpenGL ES）
+        
+        Dawn WebGPU集成说明:
+        ===================
+        本预编译库启用了Dawn WebGPU后端支持，但不包含Dawn库本身。
+        您需要在项目中单独管理Dawn WebGPU库。
+        
+        推荐的集成方式:
+        1. 使用CMake FetchContent下载Dawn
+        2. 使用vcpkg安装Dawn
+        3. 手动编译和链接Dawn库
         
         CMake使用方法:
         =============
@@ -1060,65 +906,63 @@ jobs:
         # 添加Skdn预编译库
         add_subdirectory(path/to/Skdn)
         
+        # 添加Dawn WebGPU库（示例使用FetchContent）
+        include(FetchContent)
+        FetchContent_Declare(
+            dawn
+            GIT_REPOSITORY https://dawn.googlesource.com/dawn.git
+            GIT_TAG main
+        )
+        FetchContent_MakeAvailable(dawn)
+        
         # 创建你的项目
         add_executable(MyApp main.cpp)
         
-        # 链接Skdn库（自动包含所有必要的依赖和头文件路径）
-        target_link_libraries(MyApp PRIVATE Skdn::Skdn)
+        # 链接Skdn库和Dawn库
+        target_link_libraries(MyApp PRIVATE 
+            Skdn::Skdn
+            dawn::webgpu_dawn
+            dawn::dawncpp
+        )
         \`\`\`
         
-        头文件使用示例（多种包含方式）:
-        ===============================
+        头文件使用示例:
+        ===============
         \`\`\`cpp
-        // Skia核心头文件
+        // Skia核心头文件（来自预编译库）
         #include <include/core/SkCanvas.h>
         #include <include/core/SkSurface.h>
         #include <include/gpu/GrDirectContext.h>
         #include <include/gpu/graphite/Context.h>
         #include <include/gpu/graphite/Recorder.h>
         
-        // Dawn WebGPU头文件 - 扁平化访问
-        #include <webgpu_cpp.h>        // 直接访问（推荐）
-        #include <dawn_proc.h>         // 直接访问（推荐）
+        // Dawn WebGPU头文件（来自外部Dawn库）
+        #include <webgpu/webgpu_cpp.h>
+        #include <dawn/dawn_proc.h>
         
-        // 或者通过完整路径访问
-        #include <gen/include/webgpu/webgpu_cpp.h>  # 完整gen路径
-        #include <gen/include/dawn/dawn_proc.h>     # 完整gen路径
-        
-        // Skia模块头文件
+        // Skia模块头文件（来自预编译库）
         #include <modules/skottie/include/Skottie.h>
         #include <modules/svg/include/SkSVGDOM.h>
         
         int main() {
-            // 验证宏定义
-            static_assert(SK_GANESH == 1);
-            static_assert(SK_GRAPHITE == 1);
-            static_assert(SK_DAWN == 1);
-            static_assert(WEBGPU_IMPLEMENTATION_DAWN == 1);
+            // 验证启用的后端
+            static_assert(SK_GANESH == 1);     // Ganesh后端
+            static_assert(SK_GRAPHITE == 1);   // Graphite后端
+            static_assert(SK_DAWN == 1);       // Dawn WebGPU后端
             
-            // 初始化Dawn过程表（现在完全可用）
+            // 初始化Dawn（需要外部Dawn库）
             dawnProcSetProcs(&dawn::native::GetProcs());
             
-            // 创建WebGPU实例（完整gen目录支持）
-            wgpu::InstanceDescriptor instanceDesc = {};
-            wgpu::Instance instance = wgpu::CreateInstance(&instanceDesc);
+            // 创建WebGPU实例
+            wgpu::Instance instance = wgpu::CreateInstance();
             
-            // 你的Skia + Dawn代码...
+            // 您的Skia + Dawn代码...
             return 0;
         }
         \`\`\`
         
-        gen目录收集流程:
-        ================
-        1. 预编译Dawn WebGPU目标以生成完整gen目录
-        2. 原封不动复制整个out/HeaderGen/gen目录
-        3. 保持完整的目录结构和文件组织
-        4. 验证关键子目录存在性
-        5. 提供扁平化的关键头文件访问
-        6. 完整的CMake包含路径配置
-        
-        自动启用的功能:
-        ===============
+        自动启用的宏定义:
+        =================
         \`\`\`cpp
         // GPU后端宏定义
         #define SK_GANESH 1          // 传统GPU后端
@@ -1126,7 +970,6 @@ jobs:
         #define SK_DAWN 1            // Dawn WebGPU后端
         #define SK_VULKAN 1          // Vulkan支持
         #define SK_GL 1              // OpenGL支持
-        #define WEBGPU_IMPLEMENTATION_DAWN 1  // Dawn WebGPU实现
         \`\`\`
         
         编译器版本信息:
@@ -1139,19 +982,19 @@ jobs:
         CMake配置会自动查找和链接以下类型的库文件：
         1. Skia核心库（skia*.lib, libskia*.a）
         2. Skia Graphite库（*graphite*.lib, *graphite*.a）
-        3. Dawn WebGPU库（dawn*.lib, webgpu*.lib等）
-        4. 其他依赖库（自动包含）
+        3. 其他Skia依赖库（自动包含）
+        
+        注意：Dawn WebGPU库需要外部提供！
         
         特殊说明:
         =========
-        - 现在包含了完整原封不动的Dawn gen目录结构
-        - 支持多种头文件包含方式（扁平化和完整路径）
+        - 启用了Dawn WebGPU后端但不包含Dawn库
         - 自动检测平台并链接相应的图形API库
         - C++20标准要求（Dawn WebGPU需要）
-        - 头文件所有平台共享，无需平台特定配置
+        - 头文件只包含Skia相关内容
         - 跨平台统一接口，一次编写到处运行
         - 生产环境就绪，性能优化
-        - 完整的Dawn WebGPU C++绑定支持
+        - 需要在项目中单独集成Dawn WebGPU库
         EOF
         
     # 打包统一的Skia构建包
@@ -1213,40 +1056,32 @@ jobs:
         tag_name: ${{ steps.get_tag.outputs.tag }}
         name: ${{ steps.get_tag.outputs.name }}
         body: |
-          # Skia + Dawn WebGPU 全平台预编译库（完整gen目录结构）
+          # Skia 全平台预编译库（启用Dawn/Graphite/Ganesh后端）
           
-          这是包含完整Skia和Dawn WebGPU的全平台预编译库，**完整收集了Dawn gen目录的所有内容**，包括gen/include、gen/src、gen/webgpu-headers等所有子目录，提供完整的目录结构支持。
+          这是包含完整Skia的全平台预编译库，**启用了Dawn WebGPU、Graphite、Ganesh三重GPU后端支持**，但不包含Dawn库本身，需要在项目中单独集成Dawn WebGPU库。
           
-          ## 🔧 重要改进
+          ## 🔧 重要特性
           
-          ### ✅ 完整gen目录结构收集
-          - **原封不动收集** - 完整复制out/HeaderGen/gen目录的所有内容
-          - **保持目录层次** - 维持gen/include、gen/src、gen/webgpu-headers的完整结构
-          - **双重访问方式** - 既支持完整路径访问，也提供扁平化快速访问
-          - **完整CMake配置** - 自动包含所有gen子目录的头文件路径
+          ### ✅ 三重GPU后端支持
+          - **Ganesh后端** - Skia传统GPU后端，成熟稳定
+          - **Graphite后端** - Skia现代GPU后端，性能优化
+          - **Dawn WebGPU后端** - 面向未来的跨平台GPU API支持
           
-          ### 🚀 gen目录完整内容
-          - **gen/include/** - 编译生成的头文件目录
-          - **gen/src/** - 编译生成的源码相关文件目录
-          - **gen/webgpu-headers/** - WebGPU头文件生成内容目录
-          - **完整文件结构** - 保持所有子目录和文件的原始组织方式
+          ### 🚀 Dawn WebGPU集成说明
+          - **启用Dawn支持** - Skia编译时已启用Dawn WebGPU后端
+          - **外部Dawn库** - 需要在项目中单独管理Dawn WebGPU库
+          - **灵活集成** - 支持多种Dawn库集成方式（FetchContent、vcpkg等）
           
           ## 📦 包含内容
           
-          **Skdn_Prebuilt.zip** - 完整预编译库（包含完整Dawn gen目录结构）
+          **Skdn_Prebuilt.zip** - 完整Skia预编译库（启用Dawn/Graphite/Ganesh后端）
           
           ## ✨ 主要特性
           
-          ### 🔧 完整Dawn WebGPU目录支持
-          - **原始头文件** - Dawn WebGPU源码头文件
-          - **完整gen目录** - 原封不动的编译生成文件目录结构
-            - `gen/include/` - 编译生成的头文件
-            - `gen/src/` - 编译生成的源码文件
-            - `gen/webgpu-headers/` - WebGPU头文件内容
-          - **扁平化访问** - 关键头文件同时提供直接访问路径
-            - `webgpu_cpp.h` - C++ WebGPU API绑定
-            - `dawn_proc.h` - Dawn过程表
-            - `webgpu.h` - C WebGPU API
+          ### 🔧 完整Skia功能支持
+          - **Skia核心头文件** - 完整的Skia API头文件
+          - **Skia模块头文件** - Skottie、SVG等模块支持
+          - **预编译库文件** - 按平台组织的库文件结构
           
           ### 🎮 多图形API支持
           - **Windows**: DirectX 11/12 + Vulkan + OpenGL
@@ -1256,7 +1091,7 @@ jobs:
           ### 🚀 现代技术栈
           - **C++20标准** - 完整的现代C++特性支持
           - **三重GPU后端** - Ganesh + Graphite + Dawn WebGPU
-          - **智能CMake配置** - 自动平台检测和完整头文件路径配置
+          - **智能CMake配置** - 自动平台检测和库链接
           
           ## 📋 快速开始
           
@@ -1266,7 +1101,23 @@ jobs:
           unzip Skdn_Prebuilt.zip -d third_party/
           ```
           
-          ### 2. CMake集成
+          ### 2. 集成Dawn WebGPU库
+          ```cmake
+          # 方式1: 使用FetchContent（推荐）
+          include(FetchContent)
+          FetchContent_Declare(
+              dawn
+              GIT_REPOSITORY https://dawn.googlesource.com/dawn.git
+              GIT_TAG main
+          )
+          FetchContent_MakeAvailable(dawn)
+          
+          # 方式2: 使用vcpkg
+          # vcpkg install dawn
+          # find_package(dawn CONFIG REQUIRED)
+          ```
+          
+          ### 3. CMake集成
           ```cmake
           cmake_minimum_required(VERSION 3.20)
           project(MyApp)
@@ -1275,80 +1126,53 @@ jobs:
           set(CMAKE_CXX_STANDARD 20)
           set(CMAKE_CXX_STANDARD_REQUIRED ON)
           
-          # 添加Skdn库（自动包含所有gen目录路径）
+          # 添加Skdn库
           add_subdirectory(third_party/Skdn)
+          
+          # 添加Dawn库（选择上面的方式之一）
+          # ...
           
           # 创建你的应用
           add_executable(MyApp src/main.cpp)
           
-          # 链接Skdn库（自动包含所有依赖和头文件路径）
-          target_link_libraries(MyApp PRIVATE Skdn::Skdn)
+          # 链接Skdn库和Dawn库
+          target_link_libraries(MyApp PRIVATE 
+              Skdn::Skdn
+              dawn::webgpu_dawn
+              dawn::dawncpp
+          )
           ```
           
-          ### 3. 多种头文件包含方式
+          ### 4. 代码使用示例
           ```cpp
-          // Skia核心头文件
+          // Skia核心头文件（来自预编译库）
           #include <include/core/SkCanvas.h>
           #include <include/core/SkSurface.h>
           #include <include/gpu/GrDirectContext.h>
           #include <include/gpu/graphite/Context.h>
           #include <include/gpu/graphite/Recorder.h>
           
-          // Dawn WebGPU头文件 - 扁平化访问（推荐）
-          #include <webgpu_cpp.h>        // 直接访问
-          #include <dawn_proc.h>         // 直接访问
-          
-          // 或者通过完整gen路径访问
-          #include <gen/include/webgpu/webgpu_cpp.h>  // 完整路径
-          #include <gen/include/dawn/dawn_proc.h>     // 完整路径
-          #include <gen/webgpu-headers/webgpu.h>      // WebGPU头文件
-          
-          // Skia模块头文件
-          #include <modules/skottie/include/Skottie.h>
-          #include <modules/svg/include/SkSVGDOM.h>
+          // Dawn WebGPU头文件（来自外部Dawn库）
+          #include <webgpu/webgpu_cpp.h>
+          #include <dawn/dawn_proc.h>
           
           int main() {
-              // 验证宏定义
-              static_assert(SK_GANESH == 1);
-              static_assert(SK_GRAPHITE == 1);
-              static_assert(SK_DAWN == 1);
-              static_assert(WEBGPU_IMPLEMENTATION_DAWN == 1);
+              // 验证启用的后端
+              static_assert(SK_GANESH == 1);     // Ganesh后端
+              static_assert(SK_GRAPHITE == 1);   // Graphite后端
+              static_assert(SK_DAWN == 1);       // Dawn WebGPU后端
               
-              // 初始化Dawn过程表（完整gen目录支持）
+              // 初始化Dawn（需要外部Dawn库）
               dawnProcSetProcs(&dawn::native::GetProcs());
               
               // 创建WebGPU实例
-              wgpu::InstanceDescriptor instanceDesc = {};
-              wgpu::Instance instance = wgpu::CreateInstance(&instanceDesc);
+              wgpu::Instance instance = wgpu::CreateInstance();
               
-              // 请求适配器（异步）
-              instance.RequestAdapter(&adapterOpts, [](WGPURequestAdapterStatus status,
-                  WGPUAdapter result, char const* message, void* userdata) {
-                  if (status == WGPURequestAdapterStatus_Success) {
-                      // 成功获取适配器，继续处理...
-                  }
-              }, nullptr);
+              // 创建Skia Graphite上下文
+              // skgpu::graphite::ContextFactory::MakeDawn(dawnContext);
               
               return 0;
           }
-          ```
-          
-          ## 🔧 自动CMake头文件路径配置
-          
-          CMake配置自动包含以下所有路径：
-          
-          ```cmake
-          # 自动包含的头文件路径
-          target_include_directories(Skdn INTERFACE
-              ${SKDN_ROOT_DIR}/include                    # 根include目录
-              ${SKDN_ROOT_DIR}/include/include            # Skia头文件
-              ${SKDN_ROOT_DIR}/include/dawn               # Dawn根目录
-              ${SKDN_ROOT_DIR}/include/dawn/gen           # Dawn gen根目录
-              ${SKDN_ROOT_DIR}/include/dawn/gen/include   # Dawn gen/include目录
-              ${SKDN_ROOT_DIR}/include/dawn/gen/src       # Dawn gen/src目录
-              ${SKDN_ROOT_DIR}/include/dawn/gen/webgpu-headers  # Dawn gen/webgpu-headers目录
-              ${SKDN_ROOT_DIR}/include/modules            # Skia模块目录
-          )
           ```
           
           ## 🔧 自动库链接
@@ -1357,14 +1181,12 @@ jobs:
           
           ### Windows平台
           - **Skia库**: `skia*.lib`, `*graphite*.lib`
-          - **Dawn库**: `dawn*.lib`, `webgpu*.lib`
           - **DirectX库**: `d3d11.lib`, `d3d12.lib`, `dxgi.lib`, `dxcore.lib`
           - **OpenGL库**: `OpenGL32.lib`
           - **系统库**: `Gdi32.lib`, `User32.lib`, `Kernel32.lib`等
           
           ### Linux平台
           - **Skia库**: `libskia*.a`, `*graphite*.a`
-          - **Dawn库**: `libdawn*.a`, `libwebgpu*.a`
           - **Vulkan库**: `libvulkan.so`
           - **OpenGL库**: `libGL.so`
           - **X11库**: `libX11.so`, `libXrandr.so`等
@@ -1372,7 +1194,6 @@ jobs:
           
           ### Android平台
           - **Skia库**: `libskia*.a`, `*graphite*.a`
-          - **Dawn库**: `libdawn*.a`, `libwebgpu*.a`
           - **Vulkan库**: `libvulkan.so`
           - **OpenGL ES库**: `libGLESv2.so`, `libGLESv3.so`
           - **EGL库**: `libEGL.so`
@@ -1387,7 +1208,7 @@ jobs:
           | Android | x64 | Clang 18 | `bin/Android/x64/`, `lib/Android/x64/` |
           | Android | ARM64 | Clang 18 | `bin/Android/arm64/`, `lib/Android/arm64/` |
           
-          ## 📁 完整目录结构
+          ## 📁 目录结构
           
           ```
           Skdn/
@@ -1399,73 +1220,59 @@ jobs:
           │   ├── Win/x64/          # Windows x64库文件
           │   ├── Linux/x64/        # Linux x64库文件
           │   └── Android/          # Android库文件
-          ├── include/               # 共享头文件目录
-          │   ├── include/          # Skia头文件
-          │   ├── dawn/             # Dawn WebGPU头文件目录
-          │   │   ├── gen/          # 完整的Dawn生成文件目录（原封不动）
-          │   │   │   ├── include/  # gen/include目录 - 编译生成的头文件
-          │   │   │   ├── src/      # gen/src目录 - 编译生成的源码文件
-          │   │   │   └── webgpu-headers/  # gen/webgpu-headers目录 - WebGPU头文件
-          │   │   ├── webgpu_cpp.h  # 扁平化访问的关键头文件
-          │   │   ├── dawn_proc.h   # 扁平化访问的关键头文件
-          │   │   └── ...           # 其他Dawn原始头文件
+          ├── include/               # Skia头文件目录
+          │   ├── include/          # Skia核心头文件
           │   └── modules/          # Skia模块头文件
-          └── CMakeLists.txt         # 智能CMake配置（包含完整gen路径）
+          └── CMakeLists.txt         # 智能CMake配置
           ```
           
-          ## 🎯 重要改进对比
+          ## 💡 Dawn WebGPU集成建议
           
-          | 特性 | 修复前状态 | 修复后状态 |
-          |------|------------|------------|
-          | gen目录收集 | ❌ 不完整或缺失 | ✅ 原封不动完整收集 |
-          | 目录结构保持 | ❌ 扁平化丢失层次 | ✅ 保持完整目录结构 |
-          | CMake路径配置 | ❌ 路径不完整 | ✅ 包含所有gen子目录 |
-          | 头文件访问方式 | ❌ 单一方式 | ✅ 支持多种访问方式 |
-          | gen子目录支持 | ❌ 部分缺失 | ✅ 完整支持所有子目录 |
+          ### 推荐集成方式
           
-          ## 💡 使用技巧
-          
-          ### 选择合适的头文件包含方式
-          ```cpp
-          // 推荐：使用扁平化访问（简单直接）
-          #include <webgpu_cpp.h>
-          #include <dawn_proc.h>
-          
-          // 高级：使用完整路径访问（明确来源）
-          #include <gen/include/webgpu/webgpu_cpp.h>
-          #include <gen/include/dawn/dawn_proc.h>
-          
-          // 特殊：访问webgpu-headers目录的内容
-          #include <gen/webgpu-headers/webgpu.h>
+          #### 1. FetchContent方式（推荐）
+          ```cmake
+          include(FetchContent)
+          FetchContent_Declare(
+              dawn
+              GIT_REPOSITORY https://dawn.googlesource.com/dawn.git
+              GIT_TAG chromium/6045  # 使用稳定版本
+          )
+          FetchContent_MakeAvailable(dawn)
           ```
           
-          ### Dawn WebGPU完整初始化流程
-          ```cpp
-          // 设置Dawn过程表
-          dawnProcSetProcs(&dawn::native::GetProcs());
-          
-          // 创建实例
-          wgpu::Instance instance = wgpu::CreateInstance();
-          
-          // 异步请求适配器和设备
-          // ... 您的初始化代码
+          #### 2. 子模块方式
+          ```bash
+          git submodule add https://dawn.googlesource.com/dawn.git third_party/dawn
           ```
           
-          ### Skia Graphite与Dawn集成
-          ```cpp
-          // 创建Dawn后端上下文
-          skgpu::graphite::DawnBackendContext dawnContext;
-          dawnContext.fDevice = device.Get();
-          dawnContext.fQueue = queue.Get();
-          
-          // 创建Skia Graphite上下文（完整gen目录支持）
-          auto context = skgpu::graphite::ContextFactory::MakeDawn(dawnContext);
-          auto recorder = context->makeRecorder();
+          #### 3. vcpkg方式
+          ```bash
+          vcpkg install dawn
           ```
+          
+          ### Dawn库链接
+          ```cmake
+          target_link_libraries(MyApp PRIVATE 
+              Skdn::Skdn           # Skia预编译库
+              dawn::webgpu_dawn    # Dawn WebGPU核心库
+              dawn::dawncpp        # Dawn C++绑定
+          )
+          ```
+          
+          ## 🎯 重要优势
+          
+          | 特性 | 说明 |
+          |------|------|
+          | 三重GPU后端 | Ganesh + Graphite + Dawn WebGPU |
+          | 灵活Dawn集成 | 支持多种Dawn库管理方式 |
+          | 预编译优化 | 无需编译Skia，快速集成 |
+          | 跨平台支持 | Windows、Linux、Android |
+          | 现代C++20 | 完整的现代C++特性支持 |
           
           ---
           
-          > **🎉 完整gen目录支持**: Dawn WebGPU的gen目录现已完整收集，包含gen/include、gen/src、gen/webgpu-headers等所有子目录，提供完整的目录结构和多种头文件访问方式！
+          > **🚀 开始使用**: 下载Skdn_Prebuilt.zip，按照您的需求选择合适的Dawn WebGPU库集成方式，享受Skia的强大图形功能和Dawn WebGPU的现代GPU特性！
         files: |
           Skdn_Prebuilt.zip
         draft: false
