@@ -1,4 +1,4 @@
-name: 构建Skia和Dawn
+name: Build Skia and Dawn
 
 on:
   push:
@@ -8,1050 +8,965 @@ on:
   workflow_dispatch:
 
 env:
-  SKIA_VERSION: chrome/m130
-  DAWN_VERSION: main
+  SKIA_VERSION: 'main'
+  DAWN_VERSION: 'main'
 
 jobs:
   build-windows:
     runs-on: windows-2022
     strategy:
       matrix:
-        compiler: [msvc2022, clang18]
-        backend: [dx12, dx11, vulkan, opengl]
+        config: [Release, Debug]
+        backend: [DX12, DX11, VK, GL]
     
     steps:
     - name: 检出代码
       uses: actions/checkout@v4
-
-    - name: 设置Python环境
+    
+    - name: 设置MSVC
+      uses: microsoft/setup-msbuild@v2
+    
+    - name: 设置Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
-
-    - name: 安装依赖工具
+    
+    - name: 安装依赖
       run: |
-        # 安装depot_tools
-        git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
-        echo "${{ github.workspace }}\depot_tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-        
-        # 安装Ninja
+        python -m pip install --upgrade pip
+        pip install ninja
         choco install ninja
-        
-        # 设置Git配置
-        git config --global user.name "GitHub Action"
-        git config --global user.email "action@github.com"
-
-    - name: 设置MSVC环境
-      if: matrix.compiler == 'msvc2022'
-      uses: microsoft/setup-msbuild@v2
-
-    - name: 设置Clang环境
-      if: matrix.compiler == 'clang18'
+    
+    - name: 设置Vulkan SDK
+      if: matrix.backend == 'VK'
       run: |
-        # 下载并安装LLVM/Clang 18
-        $clangUrl = "https://github.com/llvm/llvm-project/releases/download/llvmorg-18.1.8/LLVM-18.1.8-win64.exe"
-        Invoke-WebRequest -Uri $clangUrl -OutFile "llvm-installer.exe"
-        Start-Process -FilePath "llvm-installer.exe" -ArgumentList "/S" -Wait
-        echo "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-    - name: 下载并编译Skia
+        Invoke-WebRequest -Uri "https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-sdk.exe" -OutFile "vulkan-sdk.exe"
+        Start-Process -FilePath "vulkan-sdk.exe" -ArgumentList "/S" -Wait
+        echo "VULKAN_SDK=C:\VulkanSDK\1.3.280.0" >> $env:GITHUB_ENV
+    
+    - name: 克隆Depot Tools
       run: |
-        # 创建工作目录
-        mkdir skia-build
-        cd skia-build
-        
-        # 获取Skia源代码
+        git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+        echo "${{ github.workspace }}\depot_tools" >> $env:GITHUB_PATH
+    
+    - name: 克隆Skia
+      run: |
         git clone https://skia.googlesource.com/skia.git
         cd skia
         git checkout ${{ env.SKIA_VERSION }}
-        
-        # 同步依赖
         python tools/git-sync-deps
-        
-        # 配置编译参数
-        $gnArgs = @()
-        $gnArgs += "is_official_build=true"
-        $gnArgs += "is_component_build=false"
-        $gnArgs += "target_cpu=`"x64`""
-        $gnArgs += "cc=`"clang`""
-        $gnArgs += "cxx=`"clang++`""
-        $gnArgs += "clang_use_chrome_plugins=false"
-        $gnArgs += "extra_cflags_cc=[`"-std=c++20`"]"
-        
-        # 根据编译器设置
-        if ("${{ matrix.compiler }}" -eq "msvc2022") {
-          $gnArgs += "win_vc=`"2022`""
-          $gnArgs += "is_clang=false"
-        } else {
-          $gnArgs += "is_clang=true"
-        }
-        
-        # 根据后端设置
-        switch ("${{ matrix.backend }}") {
-          "dx12" { 
-            $gnArgs += "skia_use_direct3d=true"
-            $gnArgs += "skia_use_dawn=true"
-          }
-          "dx11" { 
-            $gnArgs += "skia_use_direct3d=true"
-          }
-          "vulkan" { 
-            $gnArgs += "skia_use_vulkan=true"
-          }
-          "opengl" { 
-            $gnArgs += "skia_use_gl=true"
-          }
-        }
-        
-        $gnArgs += "skia_use_system_harfbuzz=false"
-        $gnArgs += "skia_use_system_icu=false"
-        $gnArgs += "skia_use_system_libjpeg_turbo=false"
-        $gnArgs += "skia_use_system_libpng=false"
-        $gnArgs += "skia_use_system_libwebp=false"
-        $gnArgs += "skia_use_system_zlib=false"
-        
-        # 生成构建文件
-        $argsString = $gnArgs -join " "
-        gn gen out/Release --args="$argsString"
-        
-        # 编译Skia
-        ninja -C out/Release
-
-    - name: 下载并编译Dawn
+    
+    - name: 克隆Dawn
       run: |
-        cd skia-build
-        
-        # 获取Dawn源代码
         git clone https://dawn.googlesource.com/dawn.git
         cd dawn
         git checkout ${{ env.DAWN_VERSION }}
-        
-        # 同步依赖
         cp scripts/standalone.gclient .gclient
         gclient sync
-        
-        # 配置CMake编译参数
-        $cmakeArgs = @()
-        $cmakeArgs += "-DCMAKE_BUILD_TYPE=Release"
-        $cmakeArgs += "-DCMAKE_CXX_STANDARD=20"
-        $cmakeArgs += "-DDAWN_FETCH_DEPENDENCIES=ON"
-        $cmakeArgs += "-DDAWN_USE_GLFW=OFF"
-        $cmakeArgs += "-DTINT_BUILD_TESTS=OFF"
-        $cmakeArgs += "-DDAWN_BUILD_SAMPLES=OFF"
-        
-        # 根据编译器设置
-        if ("${{ matrix.compiler }}" -eq "clang18") {
-          $cmakeArgs += "-DCMAKE_C_COMPILER=clang"
-          $cmakeArgs += "-DCMAKE_CXX_COMPILER=clang++"
-        }
-        
-        # 根据后端设置
-        switch ("${{ matrix.backend }}") {
-          "dx12" { 
-            $cmakeArgs += "-DDAWN_ENABLE_D3D12=ON"
-            $cmakeArgs += "-DDAWN_ENABLE_D3D11=OFF"
-            $cmakeArgs += "-DDAWN_ENABLE_VULKAN=OFF"
-            $cmakeArgs += "-DDAWN_ENABLE_OPENGL=OFF"
-          }
-          "dx11" { 
-            $cmakeArgs += "-DDAWN_ENABLE_D3D11=ON"
-            $cmakeArgs += "-DDAWN_ENABLE_D3D12=OFF"
-            $cmakeArgs += "-DDAWN_ENABLE_VULKAN=OFF"
-            $cmakeArgs += "-DDAWN_ENABLE_OPENGL=OFF"
-          }
-          "vulkan" { 
-            $cmakeArgs += "-DDAWN_ENABLE_VULKAN=ON"
-            $cmakeArgs += "-DDAWN_ENABLE_D3D12=OFF"
-            $cmakeArgs += "-DDAWN_ENABLE_D3D11=OFF"
-            $cmakeArgs += "-DDAWN_ENABLE_OPENGL=OFF"
-          }
-          "opengl" { 
-            $cmakeArgs += "-DDAWN_ENABLE_OPENGL=ON"
-            $cmakeArgs += "-DDAWN_ENABLE_D3D12=OFF"
-            $cmakeArgs += "-DDAWN_ENABLE_D3D11=OFF"
-            $cmakeArgs += "-DDAWN_ENABLE_VULKAN=OFF"
-          }
-        }
-        
-        # 生成构建文件
-        mkdir build
-        cd build
-        cmake .. $cmakeArgs -G "Ninja"
-        
-        # 编译Dawn
-        ninja
-
-    - name: 收集和打包文件
+    
+    - name: 构建Dawn
       run: |
-        # 创建输出目录结构
-        mkdir -p Skia/include/skia
-        mkdir -p Skia/include/dawn
-        mkdir -p Skia/include/modules
-        mkdir -p Skia/bin/Win/x64
-        mkdir -p Skia/lib/Win/x64
+        cd dawn
+        mkdir -p out/Release
+        
+        $backend_define = switch ("${{ matrix.backend }}") {
+            "DX12" { "DAWN_ENABLE_BACKEND_D3D12=true" }
+            "DX11" { "DAWN_ENABLE_BACKEND_D3D11=true" }
+            "VK" { "DAWN_ENABLE_BACKEND_VULKAN=true" }
+            "GL" { "DAWN_ENABLE_BACKEND_OPENGL=true" }
+        }
+        
+        $gn_args = @(
+            "is_debug=false",
+            "target_cpu=`"x64`"",
+            "dawn_enable_d3d12=$(${{ matrix.backend }} -eq 'DX12')",
+            "dawn_enable_d3d11=$(${{ matrix.backend }} -eq 'DX11')",
+            "dawn_enable_vulkan=$(${{ matrix.backend }} -eq 'VK')",
+            "dawn_enable_opengl=$(${{ matrix.backend }} -eq 'GL')",
+            "dawn_enable_opengles=$(${{ matrix.backend }} -eq 'GL')",
+            "dawn_use_angle=true",
+            "dawn_complete_static_libs=true"
+        ) -join " "
+        
+        gn gen out/Release --args="$gn_args"
+        ninja -C out/Release
+    
+    - name: 构建Skia
+      run: |
+        cd skia
+        mkdir -p out/Release-${{ matrix.backend }}
+        
+        $backend_args = switch ("${{ matrix.backend }}") {
+            "DX12" { "skia_use_direct3d=true skia_use_dawn=true" }
+            "DX11" { "skia_use_direct3d=true" }
+            "VK" { "skia_use_vulkan=true" }
+            "GL" { "skia_use_gl=true" }
+        }
+        
+        $gn_args = @(
+            "is_debug=false",
+            "target_cpu=`"x64`"",
+            "cc=`"clang`"",
+            "cxx=`"clang++`"",
+            "clang_version=`"18`"",
+            "extra_cflags=`"[`"-std=c++20`"]`"",
+            "extra_cxxflags=`"[`"-std=c++20`"]`"",
+            "dawn_dir=`"../dawn`"",
+            $backend_args
+        ) -join " "
+        
+        gn gen out/Release-${{ matrix.backend }} --args="$gn_args"
+        ninja -C out/Release-${{ matrix.backend }}
+    
+    - name: 收集Dawn生成文件
+      run: |
+        cd dawn
+        mkdir -p ../collected-dawn/include/dawn
+        mkdir -p ../collected-dawn/include/webgpu
+        mkdir -p ../collected-dawn/src/dawn
+        mkdir -p ../collected-dawn/webgpu-headers
+        
+        # 复制生成的头文件
+        if (Test-Path "out/Release/gen/include/dawn") {
+            Copy-Item -Recurse "out/Release/gen/include/dawn/*" "../collected-dawn/include/dawn/"
+        }
+        if (Test-Path "out/Release/gen/include/webgpu") {
+            Copy-Item -Recurse "out/Release/gen/include/webgpu/*" "../collected-dawn/include/webgpu/"
+        }
+        
+        # 复制生成的源文件
+        if (Test-Path "out/Release/gen/src/dawn") {
+            Copy-Item -Recurse "out/Release/gen/src/dawn/*" "../collected-dawn/src/dawn/"
+        }
+        
+        # 复制webgpu-headers
+        if (Test-Path "out/Release/gen/webgpu-headers") {
+            Copy-Item -Recurse "out/Release/gen/webgpu-headers/*" "../collected-dawn/webgpu-headers/"
+        }
+    
+    - name: 创建输出目录结构
+      run: |
+        mkdir -p Skia-Output/include/include
+        mkdir -p Skia-Output/include/dawn
+        mkdir -p Skia-Output/include/modules
+        mkdir -p Skia-Output/bin/Win/x64
+        mkdir -p Skia-Output/lib/Win/x64
         
         # 复制Skia头文件
-        Copy-Item -Recurse skia-build/skia/include/* Skia/include/skia/
-        
-        # 复制Skia模块头文件
-        if (Test-Path "skia-build/skia/modules") {
-          Copy-Item -Recurse skia-build/skia/modules/*/include/* Skia/include/modules/ -ErrorAction SilentlyContinue
-        }
-        
-        # 复制Skia库文件
-        Copy-Item skia-build/skia/out/Release/*.lib Skia/lib/Win/x64/ -ErrorAction SilentlyContinue
-        Copy-Item skia-build/skia/out/Release/*.dll Skia/bin/Win/x64/ -ErrorAction SilentlyContinue
+        Copy-Item -Recurse "skia/include/*" "Skia-Output/include/include/"
         
         # 复制Dawn头文件
-        Copy-Item -Recurse skia-build/dawn/include/* Skia/include/dawn/
+        Copy-Item -Recurse "dawn/include/*" "Skia-Output/include/dawn/"
+        Copy-Item -Recurse "collected-dawn/include/*" "Skia-Output/include/dawn/"
         
-        # 复制Dawn生成的头文件和源码
-        if (Test-Path "skia-build/dawn/build/gen") {
-          Copy-Item -Recurse skia-build/dawn/build/gen/include/* Skia/include/dawn/ -ErrorAction SilentlyContinue
+        # 复制Skia模块头文件
+        if (Test-Path "skia/modules") {
+            Copy-Item -Recurse "skia/modules/*/include/*" "Skia-Output/include/modules/" -ErrorAction SilentlyContinue
         }
         
-        # 复制Dawn库文件
-        Copy-Item skia-build/dawn/build/src/dawn/*.lib Skia/lib/Win/x64/ -ErrorAction SilentlyContinue
-        Copy-Item skia-build/dawn/build/src/dawn/*.dll Skia/bin/Win/x64/ -ErrorAction SilentlyContinue
-
+        # 复制库文件
+        Copy-Item "skia/out/Release-${{ matrix.backend }}/*.lib" "Skia-Output/lib/Win/x64/" -ErrorAction SilentlyContinue
+        Copy-Item "dawn/out/Release/*.lib" "Skia-Output/lib/Win/x64/" -ErrorAction SilentlyContinue
+        
+        # 复制可执行文件和DLL
+        Copy-Item "skia/out/Release-${{ matrix.backend }}/*.exe" "Skia-Output/bin/Win/x64/" -ErrorAction SilentlyContinue
+        Copy-Item "skia/out/Release-${{ matrix.backend }}/*.dll" "Skia-Output/bin/Win/x64/" -ErrorAction SilentlyContinue
+        Copy-Item "dawn/out/Release/*.dll" "Skia-Output/bin/Win/x64/" -ErrorAction SilentlyContinue
+    
     - name: 创建CMakeLists.txt
       run: |
-        $cmakeContent = @"
-cmake_minimum_required(VERSION 3.20)
-project(SkiaDawn VERSION 1.0.0 LANGUAGES CXX)
-
-# 设置C++标准
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-# 平台检测
-if(WIN32)
-    set(PLATFORM_DIR "Win")
-    set(ARCH_DIR "x64")
-elseif(ANDROID)
-    set(PLATFORM_DIR "Android")
-    if(CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a")
-        set(ARCH_DIR "arm64")
-    else()
-        set(ARCH_DIR "x64")
-    endif()
-else()
-    set(PLATFORM_DIR "Linux")
-    set(ARCH_DIR "x64")
-endif()
-
-# 设置库和二进制文件路径
-set(LIB_DIR "`${CMAKE_CURRENT_SOURCE_DIR}/lib/`${PLATFORM_DIR}/`${ARCH_DIR}")
-set(BIN_DIR "`${CMAKE_CURRENT_SOURCE_DIR}/bin/`${PLATFORM_DIR}/`${ARCH_DIR}")
-
-# Skia目标
-add_library(Skia INTERFACE)
-
-# 设置包含目录
-target_include_directories(Skia INTERFACE
-    `${CMAKE_CURRENT_SOURCE_DIR}/include/skia
-    `${CMAKE_CURRENT_SOURCE_DIR}/include/dawn
-    `${CMAKE_CURRENT_SOURCE_DIR}/include/modules
-)
-
-# 链接Skia库
-if(WIN32)
-    # Windows平台的库
-    find_library(SKIA_LIB skia PATHS `${LIB_DIR} REQUIRED)
-    target_link_libraries(Skia INTERFACE `${SKIA_LIB})
-    
-    # 链接系统库
-    target_link_libraries(Skia INTERFACE
-        user32 gdi32 opengl32 d3d11 d3d12 dxgi
-        dxguid d3dcompiler
-    )
-elseif(ANDROID)
-    # Android平台的库
-    find_library(SKIA_LIB skia PATHS `${LIB_DIR} REQUIRED)
-    target_link_libraries(Skia INTERFACE `${SKIA_LIB})
-    
-    # 链接Android系统库
-    target_link_libraries(Skia INTERFACE
-        GLESv2 EGL android log
-    )
-else()
-    # Linux平台的库
-    find_library(SKIA_LIB skia PATHS `${LIB_DIR} REQUIRED)
-    target_link_libraries(Skia INTERFACE `${SKIA_LIB})
-    
-    # 链接Linux系统库
-    target_link_libraries(Skia INTERFACE
-        GL X11 pthread dl
-    )
-endif()
-
-# Dawn动态库目标
-add_library(DawnDym INTERFACE)
-
-# Dawn包含目录
-target_include_directories(DawnDym INTERFACE
-    `${CMAKE_CURRENT_SOURCE_DIR}/include/dawn
-)
-
-# 链接Dawn库
-if(WIN32)
-    find_library(DAWN_NATIVE_LIB dawn_native PATHS `${LIB_DIR} REQUIRED)
-    find_library(DAWN_PROC_LIB dawn_proc PATHS `${LIB_DIR} REQUIRED)
-    find_library(DAWN_COMMON_LIB dawn_common PATHS `${LIB_DIR} REQUIRED)
-    find_library(DAWN_UTILS_LIB dawn_utils PATHS `${LIB_DIR} REQUIRED)
-    
-    target_link_libraries(DawnDym INTERFACE
-        `${DAWN_NATIVE_LIB}
-        `${DAWN_PROC_LIB}
-        `${DAWN_COMMON_LIB}
-        `${DAWN_UTILS_LIB}
-    )
-endif()
-
-# 将Dawn链接到Skia
-target_link_libraries(Skia INTERFACE DawnDym)
-
-# 编译定义
-target_compile_definitions(Skia INTERFACE
-    SK_GL=1
-    SK_VULKAN=1
-)
-
-if(WIN32)
-    target_compile_definitions(Skia INTERFACE
-        SK_DIRECT3D=1
-        DAWN_ENABLE_BACKEND_D3D11=1
-        DAWN_ENABLE_BACKEND_D3D12=1
-    )
-endif()
-
-# 导出目标
-export(TARGETS Skia DawnDym FILE SkiaDawnTargets.cmake)
-"@
+        @"
+        cmake_minimum_required(VERSION 3.20)
+        project(SkiaWithDawn)
         
-        $cmakeContent | Out-File -FilePath "Skia/CMakeLists.txt" -Encoding utf8
-
+        set(CMAKE_CXX_STANDARD 20)
+        set(CMAKE_CXX_STANDARD_REQUIRED ON)
+        
+        # 查找依赖
+        if(WIN32)
+            find_package(Vulkan QUIET)
+        endif()
+        
+        # 创建Skia目标
+        add_library(Skia STATIC IMPORTED)
+        
+        # 设置包含目录
+        target_include_directories(Skia INTERFACE
+            `${CMAKE_CURRENT_SOURCE_DIR}/include/include
+            `${CMAKE_CURRENT_SOURCE_DIR}/include/dawn
+            `${CMAKE_CURRENT_SOURCE_DIR}/include/modules
+        )
+        
+        # 设置库文件位置
+        if(WIN32)
+            set_target_properties(Skia PROPERTIES
+                IMPORTED_LOCATION `${CMAKE_CURRENT_SOURCE_DIR}/lib/Win/x64/skia.lib
+            )
+            
+            # 创建Dawn动态库目标
+            add_library(DawnDynamic SHARED IMPORTED)
+            set_target_properties(DawnDynamic PROPERTIES
+                IMPORTED_LOCATION `${CMAKE_CURRENT_SOURCE_DIR}/bin/Win/x64/dawn.dll
+                IMPORTED_IMPLIB `${CMAKE_CURRENT_SOURCE_DIR}/lib/Win/x64/dawn.lib
+            )
+            
+            # 链接Dawn到Skia
+            target_link_libraries(Skia INTERFACE DawnDynamic)
+            
+            # 添加系统库
+            target_link_libraries(Skia INTERFACE
+                d3d12.lib
+                dxgi.lib
+                d3d11.lib
+                opengl32.lib
+            )
+            
+            if(Vulkan_FOUND)
+                target_link_libraries(Skia INTERFACE Vulkan::Vulkan)
+            endif()
+            
+        elseif(ANDROID)
+            set_target_properties(Skia PROPERTIES
+                IMPORTED_LOCATION `${CMAKE_CURRENT_SOURCE_DIR}/lib/Android/`${ANDROID_ABI}/libskia.a
+            )
+            
+            target_link_libraries(Skia INTERFACE
+                EGL
+                GLESv2
+                vulkan
+                android
+                log
+            )
+        else() # Linux
+            set_target_properties(Skia PROPERTIES
+                IMPORTED_LOCATION `${CMAKE_CURRENT_SOURCE_DIR}/lib/Linux/x64/libskia.a
+            )
+            
+            target_link_libraries(Skia INTERFACE
+                GL
+                vulkan
+                X11
+                pthread
+                dl
+            )
+        endif()
+        
+        # 导出目标
+        install(TARGETS Skia EXPORT SkiaTargets)
+        install(EXPORT SkiaTargets
+            FILE SkiaTargets.cmake
+            DESTINATION lib/cmake/Skia
+        )
+        
+        # 创建配置文件
+        include(CMakePackageConfigHelpers)
+        write_basic_package_version_file(
+            SkiaConfigVersion.cmake
+            VERSION 1.0.0
+            COMPATIBILITY SameMajorVersion
+        )
+        
+        install(FILES
+            SkiaConfig.cmake
+            `${CMAKE_CURRENT_BINARY_DIR}/SkiaConfigVersion.cmake
+            DESTINATION lib/cmake/Skia
+        )
+        "@ | Out-File -FilePath "Skia-Output/CMakeLists.txt" -Encoding utf8
+    
     - name: 上传构建产物
       uses: actions/upload-artifact@v4
       with:
-        name: skia-dawn-windows-${{ matrix.compiler }}-${{ matrix.backend }}
-        path: Skia/
-        retention-days: 30
+        name: Skia-Windows-${{ matrix.backend }}-${{ matrix.config }}
+        path: Skia-Output/
 
   build-linux:
     runs-on: ubuntu-22.04
     strategy:
       matrix:
-        compiler: [gcc13, clang18]
-        backend: [vulkan, opengl]
+        config: [Release, Debug]
+        backend: [VK, GL]
     
     steps:
     - name: 检出代码
       uses: actions/checkout@v4
-
-    - name: 安装编译器和依赖
+    
+    - name: 安装依赖
       run: |
         sudo apt-get update
-        
-        # 安装基础依赖
         sudo apt-get install -y \
           build-essential \
-          git \
+          clang-18 \
+          gcc-13 \
+          g++-13 \
+          ninja-build \
           python3 \
           python3-pip \
-          ninja-build \
-          pkg-config \
-          libx11-dev \
-          libxext-dev \
-          libxrandr-dev \
-          libxcursor-dev \
-          libxinerama-dev \
-          libxi-dev \
+          git \
+          curl \
           libgl1-mesa-dev \
           libglu1-mesa-dev \
-          libvulkan-dev \
-          vulkan-validationlayers-dev \
-          spirv-tools
-        
-        # 安装指定编译器
-        if [ "${{ matrix.compiler }}" = "gcc13" ]; then
-          sudo apt-get install -y gcc-13 g++-13
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100
-          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 100
-        else
-          # 安装Clang 18
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 18
-          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-18 100
-          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-18 100
-        fi
-        
-        # 安装depot_tools
-        git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
-        echo "$GITHUB_WORKSPACE/depot_tools" >> $GITHUB_PATH
-        
-        # 设置Git配置
-        git config --global user.name "GitHub Action"
-        git config --global user.email "action@github.com"
-
-    - name: 下载并编译Skia
+          libx11-dev \
+          libxext-dev \
+          libxfixes-dev \
+          libxi-dev \
+          libxrandr-dev \
+          libxss-dev \
+          libgconf-2-4
+    
+    - name: 安装Vulkan SDK
+      if: matrix.backend == 'VK'
       run: |
-        # 创建工作目录
-        mkdir skia-build
-        cd skia-build
-        
-        # 获取Skia源代码
+        wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
+        sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
+        sudo apt-get update
+        sudo apt-get install -y vulkan-sdk
+    
+    - name: 设置编译器
+      run: |
+        sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-18 100
+        sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-18 100
+        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100
+        sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 100
+    
+    - name: 克隆Depot Tools
+      run: |
+        git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+        echo "${{ github.workspace }}/depot_tools" >> $GITHUB_PATH
+    
+    - name: 克隆Skia
+      run: |
         git clone https://skia.googlesource.com/skia.git
         cd skia
         git checkout ${{ env.SKIA_VERSION }}
-        
-        # 同步依赖
         python3 tools/git-sync-deps
-        
-        # 配置编译参数
-        gnArgs=""
-        gnArgs="$gnArgs is_official_build=true"
-        gnArgs="$gnArgs is_component_build=false"
-        gnArgs="$gnArgs target_cpu=\"x64\""
-        gnArgs="$gnArgs extra_cflags_cc=[\"-std=c++20\"]"
-        
-        # 根据编译器设置
-        if [ "${{ matrix.compiler }}" = "gcc13" ]; then
-          gnArgs="$gnArgs is_clang=false"
-          gnArgs="$gnArgs cc=\"gcc\""
-          gnArgs="$gnArgs cxx=\"g++\""
-        else
-          gnArgs="$gnArgs is_clang=true"
-          gnArgs="$gnArgs cc=\"clang\""
-          gnArgs="$gnArgs cxx=\"clang++\""
-          gnArgs="$gnArgs clang_use_chrome_plugins=false"
-        fi
-        
-        # 根据后端设置
-        case "${{ matrix.backend }}" in
-          "vulkan")
-            gnArgs="$gnArgs skia_use_vulkan=true"
-            ;;
-          "opengl")
-            gnArgs="$gnArgs skia_use_gl=true"
-            ;;
-        esac
-        
-        gnArgs="$gnArgs skia_use_system_harfbuzz=false"
-        gnArgs="$gnArgs skia_use_system_icu=false"
-        gnArgs="$gnArgs skia_use_system_libjpeg_turbo=false"
-        gnArgs="$gnArgs skia_use_system_libpng=false"
-        gnArgs="$gnArgs skia_use_system_libwebp=false"
-        gnArgs="$gnArgs skia_use_system_zlib=false"
-        
-        # 生成构建文件
-        gn gen out/Release --args="$gnArgs"
-        
-        # 编译Skia
-        ninja -C out/Release
-
-    - name: 下载并编译Dawn
+    
+    - name: 克隆Dawn
       run: |
-        cd skia-build
-        
-        # 获取Dawn源代码
         git clone https://dawn.googlesource.com/dawn.git
         cd dawn
         git checkout ${{ env.DAWN_VERSION }}
-        
-        # 同步依赖
         cp scripts/standalone.gclient .gclient
         gclient sync
+    
+    - name: 构建Dawn
+      run: |
+        cd dawn
+        mkdir -p out/Release
         
-        # 配置CMake编译参数
-        cmakeArgs=""
-        cmakeArgs="$cmakeArgs -DCMAKE_BUILD_TYPE=Release"
-        cmakeArgs="$cmakeArgs -DCMAKE_CXX_STANDARD=20"
-        cmakeArgs="$cmakeArgs -DDAWN_FETCH_DEPENDENCIES=ON"
-        cmakeArgs="$cmakeArgs -DDAWN_USE_GLFW=OFF"
-        cmakeArgs="$cmakeArgs -DTINT_BUILD_TESTS=OFF"
-        cmakeArgs="$cmakeArgs -DDAWN_BUILD_SAMPLES=OFF"
+        gn gen out/Release --args="
+          is_debug=false
+          target_cpu=\"x64\"
+          dawn_enable_vulkan=${{ matrix.backend == 'VK' }}
+          dawn_enable_opengl=${{ matrix.backend == 'GL' }}
+          dawn_enable_opengles=${{ matrix.backend == 'GL' }}
+          dawn_complete_static_libs=true
+          cc=\"clang-18\"
+          cxx=\"clang++-18\"
+        "
+        ninja -C out/Release
+    
+    - name: 构建Skia
+      run: |
+        cd skia
+        mkdir -p out/Release-${{ matrix.backend }}
         
-        # 根据编译器设置
-        if [ "${{ matrix.compiler }}" = "clang18" ]; then
-          cmakeArgs="$cmakeArgs -DCMAKE_C_COMPILER=clang"
-          cmakeArgs="$cmakeArgs -DCMAKE_CXX_COMPILER=clang++"
-        else
-          cmakeArgs="$cmakeArgs -DCMAKE_C_COMPILER=gcc"
-          cmakeArgs="$cmakeArgs -DCMAKE_CXX_COMPILER=g++"
+        backend_args=""
+        if [ "${{ matrix.backend }}" = "VK" ]; then
+          backend_args="skia_use_vulkan=true"
+        elif [ "${{ matrix.backend }}" = "GL" ]; then
+          backend_args="skia_use_gl=true"
         fi
         
-        # 根据后端设置
-        case "${{ matrix.backend }}" in
-          "vulkan")
-            cmakeArgs="$cmakeArgs -DDAWN_ENABLE_VULKAN=ON"
-            cmakeArgs="$cmakeArgs -DDAWN_ENABLE_OPENGL=OFF"
-            ;;
-          "opengl")
-            cmakeArgs="$cmakeArgs -DDAWN_ENABLE_OPENGL=ON"
-            cmakeArgs="$cmakeArgs -DDAWN_ENABLE_VULKAN=OFF"
-            ;;
-        esac
-        
-        # 生成构建文件
-        mkdir build
-        cd build
-        cmake .. $cmakeArgs -G "Ninja"
-        
-        # 编译Dawn
-        ninja
-
-    - name: 收集和打包文件
+        gn gen out/Release-${{ matrix.backend }} --args="
+          is_debug=false
+          target_cpu=\"x64\"
+          cc=\"clang-18\"
+          cxx=\"clang++-18\"
+          extra_cflags=[\"-std=c++20\"]
+          extra_cxxflags=[\"-std=c++20\"]
+          dawn_dir=\"../dawn\"
+          $backend_args
+        "
+        ninja -C out/Release-${{ matrix.backend }}
+    
+    - name: 收集Dawn生成文件
       run: |
-        # 创建输出目录结构
-        mkdir -p Skia/include/skia
-        mkdir -p Skia/include/dawn
-        mkdir -p Skia/include/modules
-        mkdir -p Skia/bin/Linux/x64
-        mkdir -p Skia/lib/Linux/x64
+        cd dawn
+        mkdir -p ../collected-dawn/include/dawn
+        mkdir -p ../collected-dawn/include/webgpu
+        mkdir -p ../collected-dawn/src/dawn
+        mkdir -p ../collected-dawn/webgpu-headers
+        
+        # 复制生成的头文件
+        if [ -d "out/Release/gen/include/dawn" ]; then
+          cp -r out/Release/gen/include/dawn/* ../collected-dawn/include/dawn/
+        fi
+        if [ -d "out/Release/gen/include/webgpu" ]; then
+          cp -r out/Release/gen/include/webgpu/* ../collected-dawn/include/webgpu/
+        fi
+        
+        # 复制生成的源文件
+        if [ -d "out/Release/gen/src/dawn" ]; then
+          cp -r out/Release/gen/src/dawn/* ../collected-dawn/src/dawn/
+        fi
+        
+        # 复制webgpu-headers
+        if [ -d "out/Release/gen/webgpu-headers" ]; then
+          cp -r out/Release/gen/webgpu-headers/* ../collected-dawn/webgpu-headers/
+        fi
+    
+    - name: 创建输出目录结构
+      run: |
+        mkdir -p Skia-Output/include/include
+        mkdir -p Skia-Output/include/dawn
+        mkdir -p Skia-Output/include/modules
+        mkdir -p Skia-Output/bin/Linux/x64
+        mkdir -p Skia-Output/lib/Linux/x64
         
         # 复制Skia头文件
-        cp -r skia-build/skia/include/* Skia/include/skia/
-        
-        # 复制Skia模块头文件
-        if [ -d "skia-build/skia/modules" ]; then
-          find skia-build/skia/modules -name "include" -type d -exec cp -r {}/* Skia/include/modules/ \; 2>/dev/null || true
-        fi
-        
-        # 复制Skia库文件
-        cp skia-build/skia/out/Release/*.a Skia/lib/Linux/x64/ 2>/dev/null || true
-        cp skia-build/skia/out/Release/*.so Skia/bin/Linux/x64/ 2>/dev/null || true
+        cp -r skia/include/* Skia-Output/include/include/
         
         # 复制Dawn头文件
-        cp -r skia-build/dawn/include/* Skia/include/dawn/
+        cp -r dawn/include/* Skia-Output/include/dawn/
+        cp -r collected-dawn/include/* Skia-Output/include/dawn/
         
-        # 复制Dawn生成的头文件和源码
-        if [ -d "skia-build/dawn/build/gen" ]; then
-          cp -r skia-build/dawn/build/gen/include/* Skia/include/dawn/ 2>/dev/null || true
+        # 复制Skia模块头文件
+        if [ -d "skia/modules" ]; then
+          find skia/modules -name "include" -type d -exec cp -r {}/* Skia-Output/include/modules/ \; 2>/dev/null || true
         fi
         
-        # 复制Dawn库文件
-        find skia-build/dawn/build -name "*.a" -exec cp {} Skia/lib/Linux/x64/ \; 2>/dev/null || true
-        find skia-build/dawn/build -name "*.so" -exec cp {} Skia/bin/Linux/x64/ \; 2>/dev/null || true
-
-    - name: 创建CMakeLists.txt
-      run: |
-        cat > Skia/CMakeLists.txt << 'EOF'
-cmake_minimum_required(VERSION 3.20)
-project(SkiaDawn VERSION 1.0.0 LANGUAGES CXX)
-
-# 设置C++标准
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-# 平台检测
-if(WIN32)
-    set(PLATFORM_DIR "Win")
-    set(ARCH_DIR "x64")
-elseif(ANDROID)
-    set(PLATFORM_DIR "Android")
-    if(CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a")
-        set(ARCH_DIR "arm64")
-    else()
-        set(ARCH_DIR "x64")
-    endif()
-else()
-    set(PLATFORM_DIR "Linux")
-    set(ARCH_DIR "x64")
-endif()
-
-# 设置库和二进制文件路径
-set(LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib/${PLATFORM_DIR}/${ARCH_DIR}")
-set(BIN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/bin/${PLATFORM_DIR}/${ARCH_DIR}")
-
-# Skia目标
-add_library(Skia INTERFACE)
-
-# 设置包含目录
-target_include_directories(Skia INTERFACE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/skia
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/dawn
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/modules
-)
-
-# 链接Skia库
-if(WIN32)
-    # Windows平台的库
-    find_library(SKIA_LIB skia PATHS ${LIB_DIR} REQUIRED)
-    target_link_libraries(Skia INTERFACE ${SKIA_LIB})
+        # 复制库文件
+        find skia/out/Release-${{ matrix.backend }} -name "*.a" -exec cp {} Skia-Output/lib/Linux/x64/ \; 2>/dev/null || true
+        find dawn/out/Release -name "*.a" -exec cp {} Skia-Output/lib/Linux/x64/ \; 2>/dev/null || true
+        
+        # 复制可执行文件和共享库
+        find skia/out/Release-${{ matrix.backend }} -name "*.so" -exec cp {} Skia-Output/bin/Linux/x64/ \; 2>/dev/null || true
+        find dawn/out/Release -name "*.so" -exec cp {} Skia-Output/bin/Linux/x64/ \; 2>/dev/null || true
     
-    # 链接系统库
-    target_link_libraries(Skia INTERFACE
-        user32 gdi32 opengl32 d3d11 d3d12 dxgi
-        dxguid d3dcompiler
-    )
-elseif(ANDROID)
-    # Android平台的库
-    find_library(SKIA_LIB skia PATHS ${LIB_DIR} REQUIRED)
-    target_link_libraries(Skia INTERFACE ${SKIA_LIB})
-    
-    # 链接Android系统库
-    target_link_libraries(Skia INTERFACE
-        GLESv2 EGL android log
-    )
-else()
-    # Linux平台的库
-    find_library(SKIA_LIB skia PATHS ${LIB_DIR} REQUIRED)
-    target_link_libraries(Skia INTERFACE ${SKIA_LIB})
-    
-    # 链接Linux系统库
-    target_link_libraries(Skia INTERFACE
-        GL X11 pthread dl
-    )
-endif()
-
-# Dawn动态库目标
-add_library(DawnDym INTERFACE)
-
-# Dawn包含目录
-target_include_directories(DawnDym INTERFACE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/dawn
-)
-
-# 链接Dawn库
-if(UNIX AND NOT ANDROID)
-    file(GLOB DAWN_LIBS "${LIB_DIR}/libdawn*.a")
-    target_link_libraries(DawnDym INTERFACE ${DAWN_LIBS})
-endif()
-
-# 将Dawn链接到Skia
-target_link_libraries(Skia INTERFACE DawnDym)
-
-# 编译定义
-target_compile_definitions(Skia INTERFACE
-    SK_GL=1
-    SK_VULKAN=1
-)
-
-if(WIN32)
-    target_compile_definitions(Skia INTERFACE
-        SK_DIRECT3D=1
-        DAWN_ENABLE_BACKEND_D3D11=1
-        DAWN_ENABLE_BACKEND_D3D12=1
-    )
-endif()
-
-# 导出目标
-export(TARGETS Skia DawnDym FILE SkiaDawnTargets.cmake)
-EOF
-
     - name: 上传构建产物
       uses: actions/upload-artifact@v4
       with:
-        name: skia-dawn-linux-${{ matrix.compiler }}-${{ matrix.backend }}
-        path: Skia/
-        retention-days: 30
+        name: Skia-Linux-${{ matrix.backend }}-${{ matrix.config }}
+        path: Skia-Output/
 
   build-android:
     runs-on: ubuntu-22.04
     strategy:
       matrix:
+        config: [Release, Debug]
         arch: [arm64, x64]
-        backend: [vulkan, gles]
+        backend: [VK, GLES]
     
     steps:
     - name: 检出代码
       uses: actions/checkout@v4
-
+    
     - name: 设置Android NDK
       uses: nttld/setup-ndk@v1
       with:
         ndk-version: r25c
-
-    - name: 安装依赖工具
+        add-to-path: false
+    
+    - name: 安装依赖
       run: |
         sudo apt-get update
         sudo apt-get install -y \
-          build-essential \
-          git \
+          ninja-build \
           python3 \
           python3-pip \
-          ninja-build \
-          pkg-config
-        
-        # 安装depot_tools
-        git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
-        echo "$GITHUB_WORKSPACE/depot_tools" >> $GITHUB_PATH
-        
-        # 设置Git配置
-        git config --global user.name "GitHub Action"
-        git config --global user.email "action@github.com"
-
-    - name: 下载并编译Skia
+          git \
+          curl
+    
+    - name: 克隆Depot Tools
       run: |
-        # 设置Android环境变量
-        export ANDROID_NDK_ROOT=$ANDROID_NDK_LATEST_HOME
-        export ANDROID_HOME=$ANDROID_SDK_ROOT
-        
-        # 创建工作目录
-        mkdir skia-build
-        cd skia-build
-        
-        # 获取Skia源代码
+        git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+        echo "${{ github.workspace }}/depot_tools" >> $GITHUB_PATH
+    
+    - name: 克隆Skia
+      run: |
         git clone https://skia.googlesource.com/skia.git
         cd skia
         git checkout ${{ env.SKIA_VERSION }}
-        
-        # 同步依赖
         python3 tools/git-sync-deps
-        
-        # 设置架构
-        if [ "${{ matrix.arch }}" = "arm64" ]; then
-          targetCpu="arm64"
-          androidAbi="arm64-v8a"
-        else
-          targetCpu="x64"
-          androidAbi="x86_64"
-        fi
-        
-        # 配置编译参数
-        gnArgs=""
-        gnArgs="$gnArgs target_os=\"android\""
-        gnArgs="$gnArgs target_cpu=\"$targetCpu\""
-        gnArgs="$gnArgs is_official_build=true"
-        gnArgs="$gnArgs is_component_build=false"
-        gnArgs="$gnArgs is_clang=true"
-        gnArgs="$gnArgs clang_use_chrome_plugins=false"
-        gnArgs="$gnArgs extra_cflags_cc=[\"-std=c++20\"]"
-        gnArgs="$gnArgs android_ndk_root=\"$ANDROID_NDK_ROOT\""
-        gnArgs="$gnArgs ndk_api=21"
-        
-        # 根据后端设置
-        case "${{ matrix.backend }}" in
-          "vulkan")
-            gnArgs="$gnArgs skia_use_vulkan=true"
-            gnArgs="$gnArgs skia_use_gl=false"
-            ;;
-          "gles")
-            gnArgs="$gnArgs skia_use_gl=true"
-            gnArgs="$gnArgs skia_use_vulkan=false"
-            ;;
-        esac
-        
-        gnArgs="$gnArgs skia_use_system_harfbuzz=false"
-        gnArgs="$gnArgs skia_use_system_icu=false"
-        gnArgs="$gnArgs skia_use_system_libjpeg_turbo=false"
-        gnArgs="$gnArgs skia_use_system_libpng=false"
-        gnArgs="$gnArgs skia_use_system_libwebp=false"
-        gnArgs="$gnArgs skia_use_system_zlib=false"
-        
-        # 生成构建文件
-        gn gen out/Release --args="$gnArgs"
-        
-        # 编译Skia
-        ninja -C out/Release
-
-    - name: 下载并编译Dawn
+    
+    - name: 克隆Dawn
       run: |
-        cd skia-build
-        
-        # 设置Android环境变量
-        export ANDROID_NDK_ROOT=$ANDROID_NDK_LATEST_HOME
-        export ANDROID_HOME=$ANDROID_SDK_ROOT
-        
-        # 获取Dawn源代码
         git clone https://dawn.googlesource.com/dawn.git
         cd dawn
         git checkout ${{ env.DAWN_VERSION }}
-        
-        # 同步依赖
         cp scripts/standalone.gclient .gclient
         gclient sync
-        
-        # 设置架构
-        if [ "${{ matrix.arch }}" = "arm64" ]; then
-          androidAbi="arm64-v8a"
-        else
-          androidAbi="x86_64"
-        fi
-        
-        # 配置CMake编译参数
-        cmakeArgs=""
-        cmakeArgs="$cmakeArgs -DCMAKE_BUILD_TYPE=Release"
-        cmakeArgs="$cmakeArgs -DCMAKE_CXX_STANDARD=20"
-        cmakeArgs="$cmakeArgs -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake"
-        cmakeArgs="$cmakeArgs -DANDROID_ABI=$androidAbi"
-        cmakeArgs="$cmakeArgs -DANDROID_NATIVE_API_LEVEL=21"
-        cmakeArgs="$cmakeArgs -DANDROID_STL=c++_shared"
-        cmakeArgs="$cmakeArgs -DDAWN_FETCH_DEPENDENCIES=ON"
-        cmakeArgs="$cmakeArgs -DDAWN_USE_GLFW=OFF"
-        cmakeArgs="$cmakeArgs -DTINT_BUILD_TESTS=OFF"
-        cmakeArgs="$cmakeArgs -DDAWN_BUILD_SAMPLES=OFF"
-        
-        # 根据后端设置
-        case "${{ matrix.backend }}" in
-          "vulkan")
-            cmakeArgs="$cmakeArgs -DDAWN_ENABLE_VULKAN=ON"
-            cmakeArgs="$cmakeArgs -DDAWN_ENABLE_OPENGLES=OFF"
-            ;;
-          "gles")
-            cmakeArgs="$cmakeArgs -DDAWN_ENABLE_OPENGLES=ON"
-            cmakeArgs="$cmakeArgs -DDAWN_ENABLE_VULKAN=OFF"
-            ;;
-        esac
-        
-        # 生成构建文件
-        mkdir build
-        cd build
-        cmake .. $cmakeArgs -G "Ninja"
-        
-        # 编译Dawn
-        ninja
-
-    - name: 收集和打包文件
+    
+    - name: 构建Dawn for Android
       run: |
-        # 设置架构目录
-        if [ "${{ matrix.arch }}" = "arm64" ]; then
-          archDir="arm64"
-        else
-          archDir="x64"
+        cd dawn
+        mkdir -p out/Release-${{ matrix.arch }}
+        
+        target_cpu_map() {
+          case $1 in
+            arm64) echo "arm64" ;;
+            x64) echo "x64" ;;
+          esac
+        }
+        
+        target_cpu=$(target_cpu_map ${{ matrix.arch }})
+        
+        gn gen out/Release-${{ matrix.arch }} --args="
+          is_debug=false
+          target_os=\"android\"
+          target_cpu=\"$target_cpu\"
+          android_ndk_root=\"$ANDROID_NDK_ROOT\"
+          dawn_enable_vulkan=${{ matrix.backend == 'VK' }}
+          dawn_enable_opengles=${{ matrix.backend == 'GLES' }}
+          dawn_complete_static_libs=true
+        "
+        ninja -C out/Release-${{ matrix.arch }}
+    
+    - name: 构建Skia for Android
+      run: |
+        cd skia
+        mkdir -p out/Release-${{ matrix.arch }}-${{ matrix.backend }}
+        
+        target_cpu_map() {
+          case $1 in
+            arm64) echo "arm64" ;;
+            x64) echo "x64" ;;
+          esac
+        }
+        
+        target_cpu=$(target_cpu_map ${{ matrix.arch }})
+        
+        backend_args=""
+        if [ "${{ matrix.backend }}" = "VK" ]; then
+          backend_args="skia_use_vulkan=true"
+        elif [ "${{ matrix.backend }}" = "GLES" ]; then
+          backend_args="skia_use_gl=true"
         fi
         
-        # 创建输出目录结构
-        mkdir -p Skia/include/skia
-        mkdir -p Skia/include/dawn
-        mkdir -p Skia/include/modules
-        mkdir -p Skia/bin/Android/$archDir
-        mkdir -p Skia/lib/Android/$archDir
+        gn gen out/Release-${{ matrix.arch }}-${{ matrix.backend }} --args="
+          is_debug=false
+          target_os=\"android\"
+          target_cpu=\"$target_cpu\"
+          android_ndk_root=\"$ANDROID_NDK_ROOT\"
+          extra_cflags=[\"-std=c++20\"]
+          extra_cxxflags=[\"-std=c++20\"]
+          dawn_dir=\"../dawn\"
+          $backend_args
+        "
+        ninja -C out/Release-${{ matrix.arch }}-${{ matrix.backend }}
+    
+    - name: 收集Dawn生成文件
+      run: |
+        cd dawn
+        mkdir -p ../collected-dawn/include/dawn
+        mkdir -p ../collected-dawn/include/webgpu
+        mkdir -p ../collected-dawn/src/dawn
+        mkdir -p ../collected-dawn/webgpu-headers
+        
+        # 复制生成的头文件
+        if [ -d "out/Release-${{ matrix.arch }}/gen/include/dawn" ]; then
+          cp -r out/Release-${{ matrix.arch }}/gen/include/dawn/* ../collected-dawn/include/dawn/
+        fi
+        if [ -d "out/Release-${{ matrix.arch }}/gen/include/webgpu" ]; then
+          cp -r out/Release-${{ matrix.arch }}/gen/include/webgpu/* ../collected-dawn/include/webgpu/
+        fi
+        
+        # 复制生成的源文件
+        if [ -d "out/Release-${{ matrix.arch }}/gen/src/dawn" ]; then
+          cp -r out/Release-${{ matrix.arch }}/gen/src/dawn/* ../collected-dawn/src/dawn/
+        fi
+        
+        # 复制webgpu-headers
+        if [ -d "out/Release-${{ matrix.arch }}/gen/webgpu-headers" ]; then
+          cp -r out/Release-${{ matrix.arch }}/gen/webgpu-headers/* ../collected-dawn/webgpu-headers/
+        fi
+    
+    - name: 创建输出目录结构
+      run: |
+        mkdir -p Skia-Output/include/include
+        mkdir -p Skia-Output/include/dawn
+        mkdir -p Skia-Output/include/modules
+        mkdir -p Skia-Output/bin/Android/${{ matrix.arch }}
+        mkdir -p Skia-Output/lib/Android/${{ matrix.arch }}
         
         # 复制Skia头文件
-        cp -r skia-build/skia/include/* Skia/include/skia/
-        
-        # 复制Skia模块头文件
-        if [ -d "skia-build/skia/modules" ]; then
-          find skia-build/skia/modules -name "include" -type d -exec cp -r {}/* Skia/include/modules/ \; 2>/dev/null || true
-        fi
-        
-        # 复制Skia库文件
-        cp skia-build/skia/out/Release/*.a Skia/lib/Android/$archDir/ 2>/dev/null || true
-        cp skia-build/skia/out/Release/*.so Skia/bin/Android/$archDir/ 2>/dev/null || true
+        cp -r skia/include/* Skia-Output/include/include/
         
         # 复制Dawn头文件
-        cp -r skia-build/dawn/include/* Skia/include/dawn/
+        cp -r dawn/include/* Skia-Output/include/dawn/
+        cp -r collected-dawn/include/* Skia-Output/include/dawn/
         
-        # 复制Dawn生成的头文件和源码
-        if [ -d "skia-build/dawn/build/gen" ]; then
-          cp -r skia-build/dawn/build/gen/include/* Skia/include/dawn/ 2>/dev/null || true
+        # 复制Skia模块头文件
+        if [ -d "skia/modules" ]; then
+          find skia/modules -name "include" -type d -exec cp -r {}/* Skia-Output/include/modules/ \; 2>/dev/null || true
         fi
         
-        # 复制Dawn库文件
-        find skia-build/dawn/build -name "*.a" -exec cp {} Skia/lib/Android/$archDir/ \; 2>/dev/null || true
-        find skia-build/dawn/build -name "*.so" -exec cp {} Skia/bin/Android/$archDir/ \; 2>/dev/null || true
-
-    - name: 创建CMakeLists.txt
-      run: |
-        cat > Skia/CMakeLists.txt << 'EOF'
-cmake_minimum_required(VERSION 3.20)
-project(SkiaDawn VERSION 1.0.0 LANGUAGES CXX)
-
-# 设置C++标准
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-# 平台检测
-if(WIN32)
-    set(PLATFORM_DIR "Win")
-    set(ARCH_DIR "x64")
-elseif(ANDROID)
-    set(PLATFORM_DIR "Android")
-    if(CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a")
-        set(ARCH_DIR "arm64")
-    else()
-        set(ARCH_DIR "x64")
-    endif()
-else()
-    set(PLATFORM_DIR "Linux")
-    set(ARCH_DIR "x64")
-endif()
-
-# 设置库和二进制文件路径
-set(LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib/${PLATFORM_DIR}/${ARCH_DIR}")
-set(BIN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/bin/${PLATFORM_DIR}/${ARCH_DIR}")
-
-# Skia目标
-add_library(Skia INTERFACE)
-
-# 设置包含目录
-target_include_directories(Skia INTERFACE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/skia
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/dawn
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/modules
-)
-
-# 链接Skia库
-if(WIN32)
-    # Windows平台的库
-    find_library(SKIA_LIB skia PATHS ${LIB_DIR} REQUIRED)
-    target_link_libraries(Skia INTERFACE ${SKIA_LIB})
+        # 复制库文件
+        find skia/out/Release-${{ matrix.arch }}-${{ matrix.backend }} -name "*.a" -exec cp {} Skia-Output/lib/Android/${{ matrix.arch }}/ \; 2>/dev/null || true
+        find dawn/out/Release-${{ matrix.arch }} -name "*.a" -exec cp {} Skia-Output/lib/Android/${{ matrix.arch }}/ \; 2>/dev/null || true
+        
+        # 复制共享库
+        find skia/out/Release-${{ matrix.arch }}-${{ matrix.backend }} -name "*.so" -exec cp {} Skia-Output/bin/Android/${{ matrix.arch }}/ \; 2>/dev/null || true
+        find dawn/out/Release-${{ matrix.arch }} -name "*.so" -exec cp {} Skia-Output/bin/Android/${{ matrix.arch }}/ \; 2>/dev/null || true
     
-    # 链接系统库
-    target_link_libraries(Skia INTERFACE
-        user32 gdi32 opengl32 d3d11 d3d12 dxgi
-        dxguid d3dcompiler
-    )
-elseif(ANDROID)
-    # Android平台的库
-    find_library(SKIA_LIB skia PATHS ${LIB_DIR} REQUIRED)
-    target_link_libraries(Skia INTERFACE ${SKIA_LIB})
-    
-    # 链接Android系统库
-    target_link_libraries(Skia INTERFACE
-        GLESv2 EGL android log
-    )
-else()
-    # Linux平台的库
-    find_library(SKIA_LIB skia PATHS ${LIB_DIR} REQUIRED)
-    target_link_libraries(Skia INTERFACE ${SKIA_LIB})
-    
-    # 链接Linux系统库
-    target_link_libraries(Skia INTERFACE
-        GL X11 pthread dl
-    )
-endif()
-
-# Dawn动态库目标
-add_library(DawnDym INTERFACE)
-
-# Dawn包含目录
-target_include_directories(DawnDym INTERFACE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/dawn
-)
-
-# 链接Dawn库
-if(ANDROID)
-    file(GLOB DAWN_LIBS "${LIB_DIR}/libdawn*.a")
-    target_link_libraries(DawnDym INTERFACE ${DAWN_LIBS})
-endif()
-
-# 将Dawn链接到Skia
-target_link_libraries(Skia INTERFACE DawnDym)
-
-# 编译定义
-target_compile_definitions(Skia INTERFACE
-    SK_GL=1
-    SK_VULKAN=1
-)
-
-if(WIN32)
-    target_compile_definitions(Skia INTERFACE
-        SK_DIRECT3D=1
-        DAWN_ENABLE_BACKEND_D3D11=1
-        DAWN_ENABLE_BACKEND_D3D12=1
-    )
-elseif(ANDROID)
-    target_compile_definitions(Skia INTERFACE
-        SK_BUILD_FOR_ANDROID=1
-        DAWN_ENABLE_BACKEND_OPENGLES=1
-        DAWN_ENABLE_BACKEND_VULKAN=1
-    )
-endif()
-
-# 导出目标
-export(TARGETS Skia DawnDym FILE SkiaDawnTargets.cmake)
-EOF
-
     - name: 上传构建产物
       uses: actions/upload-artifact@v4
       with:
-        name: skia-dawn-android-${{ matrix.arch }}-${{ matrix.backend }}
-        path: Skia/
-        retention-days: 30
+        name: Skia-Android-${{ matrix.arch }}-${{ matrix.backend }}-${{ matrix.config }}
+        path: Skia-Output/
 
-  package-release:
+  package:
     needs: [build-windows, build-linux, build-android]
     runs-on: ubuntu-22.04
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
-    
     steps:
     - name: 下载所有构建产物
       uses: actions/download-artifact@v4
       with:
         path: artifacts
-
-    - name: 合并构建结果
+    
+    - name: 合并构建产物
       run: |
-        mkdir -p Skia-Release/include
-        mkdir -p Skia-Release/bin
-        mkdir -p Skia-Release/lib
+        mkdir -p Skia-Final
         
-        # 合并所有头文件（只需要一份）
-        firstArtifact=$(find artifacts -name "skia-dawn-*" -type d | head -n 1)
-        if [ -n "$firstArtifact" ]; then
-          cp -r "$firstArtifact"/include/* Skia-Release/include/
-          cp "$firstArtifact"/CMakeLists.txt Skia-Release/
-        fi
-        
-        # 合并所有平台的二进制文件和库文件
-        for artifactDir in artifacts/skia-dawn-*; do
-          if [ -d "$artifactDir/bin" ]; then
-            cp -r "$artifactDir"/bin/* Skia-Release/bin/
-          fi
-          if [ -d "$artifactDir/lib" ]; then
-            cp -r "$artifactDir"/lib/* Skia-Release/lib/
+        # 合并所有构建产物
+        for artifact_dir in artifacts/*/; do
+          if [ -d "$artifact_dir" ]; then
+            echo "合并 $artifact_dir"
+            cp -r "$artifact_dir"/* Skia-Final/ 2>/dev/null || true
           fi
         done
-
+        
+        # 确保目录结构正确
+        mkdir -p Skia-Final/include/{include,dawn,modules}
+        mkdir -p Skia-Final/bin/{Win/x64,Linux/x64,Android/{arm64,x64}}
+        mkdir -p Skia-Final/lib/{Win/x64,Linux/x64,Android/{arm64,x64}}
+    
+    - name: 创建最终CMakeLists.txt
+      run: |
+        cat > Skia-Final/CMakeLists.txt << 'EOF'
+        cmake_minimum_required(VERSION 3.20)
+        project(SkiaWithDawn)
+        
+        set(CMAKE_CXX_STANDARD 20)
+        set(CMAKE_CXX_STANDARD_REQUIRED ON)
+        
+        # 检测平台
+        if(WIN32)
+            set(PLATFORM_DIR "Win")
+            set(PLATFORM_ARCH "x64")
+            set(LIB_EXT ".lib")
+            set(SHARED_EXT ".dll")
+        elseif(ANDROID)
+            set(PLATFORM_DIR "Android")
+            set(PLATFORM_ARCH ${ANDROID_ABI})
+            set(LIB_EXT ".a")
+            set(SHARED_EXT ".so")
+        else() # Linux
+            set(PLATFORM_DIR "Linux")
+            set(PLATFORM_ARCH "x64")
+            set(LIB_EXT ".a")
+            set(SHARED_EXT ".so")
+        endif()
+        
+        set(LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib/${PLATFORM_DIR}/${PLATFORM_ARCH}")
+        set(BIN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/bin/${PLATFORM_DIR}/${PLATFORM_ARCH}")
+        
+        # 查找依赖
+        if(WIN32)
+            find_package(Vulkan QUIET)
+        elseif(ANDROID)
+            find_library(EGL_LIB EGL)
+            find_library(GLES_LIB GLESv2)
+            find_library(VULKAN_LIB vulkan)
+            find_library(ANDROID_LIB android)
+            find_library(LOG_LIB log)
+        else()
+            find_package(PkgConfig REQUIRED)
+            pkg_check_modules(GL REQUIRED gl)
+            find_package(Vulkan QUIET)
+            find_package(X11 REQUIRED)
+        endif()
+        
+        # 创建Skia目标
+        add_library(Skia STATIC IMPORTED)
+        
+        # 设置包含目录
+        target_include_directories(Skia INTERFACE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/include/dawn
+            ${CMAKE_CURRENT_SOURCE_DIR}/include/modules
+        )
+        
+        # 查找Skia库文件
+        file(GLOB SKIA_LIBS "${LIB_DIR}/*skia*${LIB_EXT}")
+        if(SKIA_LIBS)
+            list(GET SKIA_LIBS 0 SKIA_MAIN_LIB)
+            set_target_properties(Skia PROPERTIES
+                IMPORTED_LOCATION ${SKIA_MAIN_LIB}
+            )
+        endif()
+        
+        # 创建Dawn动态库目标
+        add_library(DawnDynamic SHARED IMPORTED)
+        
+        # 查找Dawn库文件
+        if(WIN32)
+            file(GLOB DAWN_SHARED_LIBS "${BIN_DIR}/*dawn*${SHARED_EXT}")
+            file(GLOB DAWN_IMPORT_LIBS "${LIB_DIR}/*dawn*${LIB_EXT}")
+            
+            if(DAWN_SHARED_LIBS AND DAWN_IMPORT_LIBS)
+                list(GET DAWN_SHARED_LIBS 0 DAWN_SHARED_LIB)
+                list(GET DAWN_IMPORT_LIBS 0 DAWN_IMPORT_LIB)
+                set_target_properties(DawnDynamic PROPERTIES
+                    IMPORTED_LOCATION ${DAWN_SHARED_LIB}
+                    IMPORTED_IMPLIB ${DAWN_IMPORT_LIB}
+                )
+            endif()
+        else()
+            file(GLOB DAWN_SHARED_LIBS "${BIN_DIR}/*dawn*${SHARED_EXT}")
+            if(DAWN_SHARED_LIBS)
+                list(GET DAWN_SHARED_LIBS 0 DAWN_SHARED_LIB)
+                set_target_properties(DawnDynamic PROPERTIES
+                    IMPORTED_LOCATION ${DAWN_SHARED_LIB}
+                )
+            endif()
+        endif()
+        
+        # 链接Dawn到Skia
+        target_link_libraries(Skia INTERFACE DawnDynamic)
+        
+        # 添加其他Dawn静态库
+        file(GLOB DAWN_STATIC_LIBS "${LIB_DIR}/*dawn*${LIB_EXT}")
+        foreach(DAWN_LIB ${DAWN_STATIC_LIBS})
+            add_library(dawn_${DAWN_LIB} STATIC IMPORTED)
+            set_target_properties(dawn_${DAWN_LIB} PROPERTIES
+                IMPORTED_LOCATION ${DAWN_LIB}
+            )
+            target_link_libraries(Skia INTERFACE dawn_${DAWN_LIB})
+        endforeach()
+        
+        # 添加系统库
+        if(WIN32)
+            target_link_libraries(Skia INTERFACE
+                d3d12.lib
+                dxgi.lib
+                d3d11.lib
+                opengl32.lib
+                user32.lib
+                gdi32.lib
+                winmm.lib
+                imm32.lib
+                ole32.lib
+                oleaut32.lib
+                uuid.lib
+                version.lib
+                shell32.lib
+                ws2_32.lib
+            )
+            
+            if(Vulkan_FOUND)
+                target_link_libraries(Skia INTERFACE Vulkan::Vulkan)
+            endif()
+            
+        elseif(ANDROID)
+            target_link_libraries(Skia INTERFACE
+                ${EGL_LIB}
+                ${GLES_LIB}
+                ${VULKAN_LIB}
+                ${ANDROID_LIB}
+                ${LOG_LIB}
+            )
+        else() # Linux
+            target_link_libraries(Skia INTERFACE
+                ${GL_LIBRARIES}
+                ${X11_LIBRARIES}
+                pthread
+                dl
+                rt
+            )
+            
+            if(Vulkan_FOUND)
+                target_link_libraries(Skia INTERFACE Vulkan::Vulkan)
+            endif()
+        endif()
+        
+        # 导出目标
+        install(TARGETS Skia EXPORT SkiaTargets)
+        install(EXPORT SkiaTargets
+            FILE SkiaTargets.cmake
+            DESTINATION lib/cmake/Skia
+        )
+        
+        # 创建配置文件
+        include(CMakePackageConfigHelpers)
+        write_basic_package_version_file(
+            SkiaConfigVersion.cmake
+            VERSION 1.0.0
+            COMPATIBILITY SameMajorVersion
+        )
+        
+        configure_file(
+            "${CMAKE_CURRENT_SOURCE_DIR}/SkiaConfig.cmake.in"
+            "${CMAKE_CURRENT_BINARY_DIR}/SkiaConfig.cmake"
+            @ONLY
+        )
+        
+        install(FILES
+            "${CMAKE_CURRENT_BINARY_DIR}/SkiaConfig.cmake"
+            "${CMAKE_CURRENT_BINARY_DIR}/SkiaConfigVersion.cmake"
+            DESTINATION lib/cmake/Skia
+        )
+        
+        # 安装头文件
+        install(DIRECTORY include/ DESTINATION include/)
+        
+        # 安装库文件和二进制文件
+        install(DIRECTORY lib/ DESTINATION lib/)
+        install(DIRECTORY bin/ DESTINATION bin/)
+        EOF
+    
+    - name: 创建SkiaConfig.cmake.in
+      run: |
+        cat > Skia-Final/SkiaConfig.cmake.in << 'EOF'
+        @PACKAGE_INIT@
+        
+        include(CMakeFindDependencyMacro)
+        
+        if(WIN32)
+            find_dependency(Vulkan QUIET)
+        elseif(ANDROID)
+            find_dependency(Vulkan QUIET)
+        else()
+            find_dependency(PkgConfig REQUIRED)
+            find_dependency(Vulkan QUIET)
+            find_dependency(X11 REQUIRED)
+        endif()
+        
+        include("${CMAKE_CURRENT_LIST_DIR}/SkiaTargets.cmake")
+        
+        check_required_components(Skia)
+        EOF
+    
+    - name: 创建README.md
+      run: |
+        cat > Skia-Final/README.md << 'EOF'
+        # Skia with Dawn 预编译库
+        
+        这个包包含了预编译的Skia和Dawn库,支持多个平台和渲染后端。
+        
+        ## 支持的平台和后端
+        
+        ### Windows x64
+        - DirectX 12
+        - DirectX 11  
+        - Vulkan
+        - OpenGL
+        
+        ### Linux x64
+        - Vulkan
+        - OpenGL
+        
+        ### Android
+        - Vulkan (arm64, x64)
+        - OpenGL ES (EGL) (arm64, x64)
+        
+        ## 目录结构
+        
+        ```
+        Skia/
+        ├── include/
+        │   ├── include/     # Skia头文件
+        │   ├── dawn/        # Dawn头文件和生成的头文件
+        │   └── modules/     # Skia模块头文件
+        ├── lib/
+        │   ├── Win/x64/     # Windows静态库
+        │   ├── Linux/x64/   # Linux静态库
+        │   └── Android/     # Android静态库
+        │       ├── arm64/
+        │       └── x64/
+        ├── bin/
+        │   ├── Win/x64/     # Windows DLL和可执行文件
+        │   ├── Linux/x64/   # Linux共享库
+        │   └── Android/     # Android共享库
+        │       ├── arm64/
+        │       └── x64/
+        └── CMakeLists.txt   # CMake配置文件
+        ```
+        
+        ## 使用方法
+        
+        ### CMake集成
+        
+        ```cmake
+        # 添加Skia目录到CMAKE_PREFIX_PATH
+        list(APPEND CMAKE_PREFIX_PATH "/path/to/Skia")
+        
+        # 查找Skia包
+        find_package(Skia REQUIRED)
+        
+        # 链接到你的目标
+        target_link_libraries(your_target PRIVATE Skia)
+        ```
+        
+        ### 直接使用
+        
+        ```cmake
+        # 添加Skia子目录
+        add_subdirectory(path/to/Skia)
+        
+        # 链接到你的目标
+        target_link_libraries(your_target PRIVATE Skia)
+        ```
+        
+        ## 编译器要求
+        
+        - Windows: MSVC 2022 或 Clang 18
+        - Linux: GCC 13 或 Clang 18
+        - Android: NDK r25c
+        - C++20 标准支持
+        
+        ## 注意事项
+        
+        1. Dawn库包含了动态生成的头文件和源文件
+        2. 不同后端的库可能需要不同的系统依赖
+        3. 确保目标平台安装了相应的图形驱动程序
+        4. Android版本需要在设备上测试兼容性
+        EOF
+    
     - name: 创建最终压缩包
       run: |
-        cd Skia-Release
-        tar -czf ../Skia.tar.gz .
-        cd ..
-        zip -r Skia.zip Skia-Release/
-
-    - name: 创建Release
-      uses: softprops/action-gh-release@v2
+        cd Skia-Final
+        zip -r ../Skia.zip . -x "*.git*"
+    
+    - name: 上传最终产物
+      uses: actions/upload-artifact@v4
       with:
-        tag_name: v${{ github.run_number }}
-        name: Skia + Dawn 预编译库 v${{ github.run_number }}
+        name: Skia-Complete-Package
+        path: Skia.zip
+        retention-days: 30
+    
+    - name: 创建Release
+      if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: Skia.zip
+        tag_name: ${{ github.ref_name }}
+        name: Skia with Dawn ${{ github.ref_name }}
         body: |
-          ## Skia + Dawn 预编译库
+          # Skia with Dawn 预编译库
           
-          这个Release包含了为多个平台和编译器编译的Skia和Dawn库：
+          支持的平台和后端:
+          - Windows x64: DX12, DX11, Vulkan, OpenGL
+          - Linux x64: Vulkan, OpenGL  
+          - Android: Vulkan, OpenGL ES (arm64, x64)
           
-          ### 支持的平台和编译器：
-          - **Windows x64**: MSVC 2022, Clang 18
-          - **Linux x64**: GCC 13, Clang 18  
-          - **Android**: ARM64, x64
+          编译器版本:
+          - Clang 18
+          - GCC 13
+          - MSVC 2022
+          - C++20 标准
           
-          ### 支持的图形后端：
-          - **Windows**: DirectX 12, DirectX 11, Vulkan, OpenGL
-          - **Linux**: Vulkan, OpenGL
-          - **Android**: Vulkan, OpenGL ES (EGL)
-          
-          ### 使用方法：
-          1. 解压Skia.zip到你的项目目录
-          2. 在CMakeLists.txt中添加：
-             ```cmake
-             add_subdirectory(Skia)
-             target_link_libraries(your_target Skia)
-             ```
-          
-          ### 目录结构：
-          ```
-          Skia/
-          ├── include/          # 头文件
-          │   ├── skia/        # Skia头文件
-          │   ├── dawn/        # Dawn头文件（包含生成的文件）
-          │   └── modules/     # Skia模块头文件
-          ├── bin/             # 动态库文件
-          │   ├── Win/x64/     # Windows二进制文件
-          │   ├── Linux/x64/   # Linux二进制文件
-          │   └── Android/     # Android二进制文件
-          ├── lib/             # 静态库文件
-          │   ├── Win/x64/     # Windows库文件
-          │   ├── Linux/x64/   # Linux库文件
-          │   └── Android/     # Android库文件
-          └── CMakeLists.txt   # CMake配置文件
-          ```
-        files: |
-          Skia.zip
-          Skia.tar.gz
+          包含Dawn动态生成的头文件和源文件,可直接用于CMake项目。
         draft: false
         prerelease: false
       env:
