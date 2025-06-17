@@ -1,4 +1,4 @@
-# Skia 全平台统一构建工作流（启用Dawn/Graphite/Ganesh后端，不编译Dawn）
+# Skia 全平台统一构建工作流（仅编译Skia，不编译Dawn）
 name: 编译 Skia 全平台统一构建包
 
 on:
@@ -174,7 +174,7 @@ jobs:
         python tools/git-sync-deps
       shell: bash
       
-    # 配置Skia构建参数
+    # 配置Skia构建参数（启用Dawn但不编译Dawn）
     - name: 配置Skia构建参数
       run: |
         cd skia
@@ -195,16 +195,18 @@ jobs:
         args="$args skia_enable_svg=true"
         args="$args skia_use_icu=true"
         
-        # 启用双GPU后端支持 - Ganesh和Graphite
+        # 启用传统GPU后端支持 - Ganesh
         args="$args skia_enable_gpu=true"
         args="$args skia_use_gl=true"
         args="$args skia_use_vulkan=true"
         args="$args skia_enable_spirv_validation=false"
         
-        # 启用Graphite后端及Dawn WebGPU支持（但不编译Dawn）
+        # 启用现代GPU后端 - Graphite（暂不启用Dawn以避免复杂性）
         args="$args skia_enable_graphite=true"
-        args="$args skia_use_dawn=true"
-        args="$args skia_use_wgpu=true"
+        
+        # 禁用Dawn相关功能以简化构建
+        args="$args skia_use_dawn=false"
+        args="$args skia_use_wgpu=false"
         
         # 禁用工具构建以避免测试工具API问题
         args="$args skia_enable_tools=false"
@@ -225,11 +227,6 @@ jobs:
             args="$args skia_use_system_harfbuzz=false"
             args="$args skia_use_dng_sdk=false"
             args="$args skia_use_piex=false"
-            # Dawn WebGPU Windows特定配置（但不编译Dawn本身）
-            args="$args dawn_enable_d3d11=true"
-            args="$args dawn_enable_d3d12=true"
-            args="$args dawn_enable_vulkan=true"
-            args="$args dawn_enable_desktop_gl=true"
             # 设置Windows编译参数（分别设置C和C++标准）
             args="$args extra_cflags=[\"/MD\"]"
             args="$args extra_cflags_c=[\"/MD\"]"
@@ -245,11 +242,6 @@ jobs:
             args="$args skia_use_piex=true"
             args="$args skia_use_system_freetype2=true"
             args="$args skia_use_system_harfbuzz=true"
-            # Dawn WebGPU Linux特定配置（但不编译Dawn本身）
-            args="$args dawn_enable_vulkan=true"
-            args="$args dawn_enable_desktop_gl=true"
-            args="$args dawn_use_wayland=true"
-            args="$args dawn_use_x11=true"
             # 根据编译器设置Linux编译参数
             if [ "${{ matrix.compiler }}" = "gcc13" ]; then
               args="$args extra_cflags_c=[]"
@@ -258,8 +250,6 @@ jobs:
               args="$args extra_cflags_c=[\"-stdlib=libc++\"]"
               args="$args extra_cflags_cc=[\"-std=c++20\", \"-stdlib=libc++\"]"
             fi
-            # 强制覆盖Dawn的C++标准设置
-            args="$args dawn_cxx_standard=\"c++20\""
             ;;
           "android")
             # Android平台特定配置 - 使用Clang 18
@@ -273,14 +263,9 @@ jobs:
             args="$args skia_use_system_harfbuzz=false"
             args="$args skia_use_dng_sdk=true"
             args="$args skia_use_piex=true"
-            # Dawn WebGPU Android特定配置（但不编译Dawn本身）
-            args="$args dawn_enable_vulkan=true"
-            args="$args dawn_enable_opengles=true"
             # 设置Android编译参数
             args="$args extra_cflags_c=[]"
             args="$args extra_cflags_cc=[\"-std=c++20\"]"
-            # 强制覆盖Dawn的C++标准设置
-            args="$args dawn_cxx_standard=\"c++20\""
             ;;
         esac
         
@@ -348,7 +333,7 @@ jobs:
         path: skia/artifacts/
         retention-days: 30
 
-  # 收集共享头文件（只收集Skia和模块头文件）
+  # 收集Skia头文件（仅收集Skia相关头文件）
   collect-headers:
     runs-on: ubuntu-latest
     
@@ -430,10 +415,10 @@ jobs:
         path: artifacts
         
     # 创建统一的Skia包结构
-    - name: 创建统一Skdn包
+    - name: 创建统一Skia包
       run: |
-        # 创建Skdn包的根目录结构
-        mkdir -p Skdn
+        # 创建Skia包的根目录结构
+        mkdir -p Skia
         
         # 合并所有平台的构建产物
         echo "合并平台构建产物..."
@@ -441,10 +426,10 @@ jobs:
           if [ -d "$artifact_dir" ] && [[ ! "$artifact_dir" =~ shared-headers ]]; then
             echo "处理构建产物: $artifact_dir"
             if [ -d "$artifact_dir/bin" ]; then
-              cp -r "$artifact_dir/bin" Skdn/ 2>/dev/null || true
+              cp -r "$artifact_dir/bin" Skia/ 2>/dev/null || true
             fi
             if [ -d "$artifact_dir/lib" ]; then
-              cp -r "$artifact_dir/lib" Skdn/ 2>/dev/null || true
+              cp -r "$artifact_dir/lib" Skia/ 2>/dev/null || true
             fi
           fi
         done
@@ -452,52 +437,52 @@ jobs:
         # 复制共享头文件
         echo "复制Skia头文件..."
         if [ -d "artifacts/shared-headers/include" ]; then
-          cp -r artifacts/shared-headers/include Skdn/
+          cp -r artifacts/shared-headers/include Skia/
         fi
         
         # 创建示例目录
-        mkdir -p Skdn/examples
+        mkdir -p Skia/examples
         
-        echo "✅ 统一Skdn包结构创建完成"
+        echo "✅ 统一Skia包结构创建完成"
         
         # 显示最终的目录结构
         echo "最终目录结构预览:"
-        find Skdn -type d | head -20
+        find Skia -type d | head -20
         
-        skia_header_count=$(find Skdn/include -name "*.h" 2>/dev/null | wc -l)
+        skia_header_count=$(find Skia/include -name "*.h" 2>/dev/null | wc -l)
         echo "最终Skia头文件总数: $skia_header_count"
         
     # 生成统一的CMakeLists.txt文件
     - name: 生成统一CMakeLists.txt
       run: |
-        cat > Skdn/CMakeLists.txt << 'EOF'
-        # Skia 预编译库的CMake配置文件（启用Dawn/Graphite/Ganesh后端）
+        cat > Skia/CMakeLists.txt << 'EOF'
+        # Skia 预编译库的CMake配置文件（纯Skia，不包含Dawn）
         cmake_minimum_required(VERSION 3.20)
         
         # 设置项目信息
-        project(SkdnPrebuilt
+        project(SkiaPrebuilt
             VERSION 1.0.0
-            DESCRIPTION "完整预编译的Skia图形库（启用Dawn/Graphite/Ganesh后端）"
+            DESCRIPTION "完整预编译的Skia图形库（纯Skia版本）"
             LANGUAGES CXX C
         )
         
-        # 设置C++标准为C++20（Dawn WebGPU需要C++20特性）
+        # 设置C++标准为C++20
         set(CMAKE_CXX_STANDARD 20)
         set(CMAKE_CXX_STANDARD_REQUIRED ON)
         set(CMAKE_CXX_EXTENSIONS OFF)
         
         # 获取当前目录
-        get_filename_component(SKDN_ROOT_DIR "${CMAKE_CURRENT_LIST_DIR}" ABSOLUTE)
+        get_filename_component(SKIA_ROOT_DIR "${CMAKE_CURRENT_LIST_DIR}" ABSOLUTE)
         
-        # 创建Skdn::Skdn接口库
-        add_library(Skdn INTERFACE)
-        add_library(Skdn::Skdn ALIAS Skdn)
+        # 创建Skia::Skia接口库
+        add_library(Skia INTERFACE)
+        add_library(Skia::Skia ALIAS Skia)
         
         # 设置Skia头文件包含目录
-        target_include_directories(Skdn INTERFACE
-            $<BUILD_INTERFACE:${SKDN_ROOT_DIR}/include>
-            $<BUILD_INTERFACE:${SKDN_ROOT_DIR}/include/include>   # Skia头文件
-            $<BUILD_INTERFACE:${SKDN_ROOT_DIR}/include/modules>   # Skia模块头文件
+        target_include_directories(Skia INTERFACE
+            $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/include>
+            $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/include/include>   # Skia头文件
+            $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/include/modules>   # Skia模块头文件
             $<INSTALL_INTERFACE:include>
             $<INSTALL_INTERFACE:include/include>
             $<INSTALL_INTERFACE:include/modules>
@@ -505,11 +490,11 @@ jobs:
         
         # 检测当前平台和架构
         if(WIN32)
-            set(SKDN_PLATFORM "Win")
+            set(SKIA_PLATFORM "Win")
             if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-                set(SKDN_ARCH "x64")
+                set(SKIA_ARCH "x64")
             else()
-                set(SKDN_ARCH "x86")
+                set(SKIA_ARCH "x86")
             endif()
         elseif(APPLE)
             # macOS暂时不支持，显示警告信息
@@ -517,33 +502,33 @@ jobs:
             message(WARNING "请使用Windows、Linux或Android版本")
             return()
         elseif(ANDROID)
-            set(SKDN_PLATFORM "Android")
+            set(SKIA_PLATFORM "Android")
             if(CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a")
-                set(SKDN_ARCH "arm64")
+                set(SKIA_ARCH "arm64")
             elseif(CMAKE_ANDROID_ARCH_ABI STREQUAL "x86_64")
-                set(SKDN_ARCH "x64")
+                set(SKIA_ARCH "x64")
             else()
-                set(SKDN_ARCH "x64")
+                set(SKIA_ARCH "x64")
             endif()
         else()
-            set(SKDN_PLATFORM "Linux")
+            set(SKIA_PLATFORM "Linux")
             if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-                set(SKDN_ARCH "x64")
+                set(SKIA_ARCH "x64")
             else()
-                set(SKDN_ARCH "x86")
+                set(SKIA_ARCH "x86")
             endif()
         endif()
         
         # 设置平台特定的库和二进制文件路径
-        set(SKDN_LIB_DIR "${SKDN_ROOT_DIR}/lib/${SKDN_PLATFORM}/${SKDN_ARCH}")
-        set(SKDN_BIN_DIR "${SKDN_ROOT_DIR}/bin/${SKDN_PLATFORM}/${SKDN_ARCH}")
+        set(SKIA_LIB_DIR "${SKIA_ROOT_DIR}/lib/${SKIA_PLATFORM}/${SKIA_ARCH}")
+        set(SKIA_BIN_DIR "${SKIA_ROOT_DIR}/bin/${SKIA_PLATFORM}/${SKIA_ARCH}")
         
         # 检查库目录是否存在
-        if(NOT EXISTS "${SKDN_LIB_DIR}")
-            message(WARNING "Skdn库目录不存在: ${SKDN_LIB_DIR}")
-            message(STATUS "当前平台: ${SKDN_PLATFORM}, 架构: ${SKDN_ARCH}")
+        if(NOT EXISTS "${SKIA_LIB_DIR}")
+            message(WARNING "Skia库目录不存在: ${SKIA_LIB_DIR}")
+            message(STATUS "当前平台: ${SKIA_PLATFORM}, 架构: ${SKIA_ARCH}")
             # 尝试查找可用的平台目录
-            file(GLOB AVAILABLE_PLATFORMS "${SKDN_ROOT_DIR}/lib/*")
+            file(GLOB AVAILABLE_PLATFORMS "${SKIA_ROOT_DIR}/lib/*")
             if(AVAILABLE_PLATFORMS)
                 message(STATUS "可用的平台目录:")
                 foreach(platform_dir ${AVAILABLE_PLATFORMS})
@@ -558,32 +543,32 @@ jobs:
         endif()
         
         # 查找所有库文件（按重要性排序）
-        file(GLOB SKDN_SKIA_LIBRARIES 
-            "${SKDN_LIB_DIR}/skia*.lib" 
-            "${SKDN_LIB_DIR}/skia*.a"
-            "${SKDN_LIB_DIR}/libskia*.lib" 
-            "${SKDN_LIB_DIR}/libskia*.a"
+        file(GLOB SKIA_CORE_LIBRARIES 
+            "${SKIA_LIB_DIR}/skia*.lib" 
+            "${SKIA_LIB_DIR}/skia*.a"
+            "${SKIA_LIB_DIR}/libskia*.lib" 
+            "${SKIA_LIB_DIR}/libskia*.a"
         )
-        file(GLOB SKDN_GRAPHITE_LIBRARIES 
-            "${SKDN_LIB_DIR}/*graphite*.lib" 
-            "${SKDN_LIB_DIR}/*graphite*.a"
+        file(GLOB SKIA_GRAPHITE_LIBRARIES 
+            "${SKIA_LIB_DIR}/*graphite*.lib" 
+            "${SKIA_LIB_DIR}/*graphite*.a"
         )
-        file(GLOB SKDN_OTHER_LIBRARIES "${SKDN_LIB_DIR}/*.lib" "${SKDN_LIB_DIR}/*.a")
+        file(GLOB SKIA_OTHER_LIBRARIES "${SKIA_LIB_DIR}/*.lib" "${SKIA_LIB_DIR}/*.a")
         
         # 合并所有库文件
-        set(SKDN_LIBRARIES ${SKDN_SKIA_LIBRARIES} ${SKDN_GRAPHITE_LIBRARIES})
+        set(SKIA_LIBRARIES ${SKIA_CORE_LIBRARIES} ${SKIA_GRAPHITE_LIBRARIES})
         # 添加其他库文件，避免重复
-        foreach(lib ${SKDN_OTHER_LIBRARIES})
-            list(FIND SKDN_LIBRARIES ${lib} found_index)
+        foreach(lib ${SKIA_OTHER_LIBRARIES})
+            list(FIND SKIA_LIBRARIES ${lib} found_index)
             if(found_index EQUAL -1)
-                list(APPEND SKDN_LIBRARIES ${lib})
+                list(APPEND SKIA_LIBRARIES ${lib})
             endif()
         endforeach()
         
-        if(NOT SKDN_LIBRARIES)
-            message(WARNING "在 ${SKDN_LIB_DIR} 中未找到库文件")
+        if(NOT SKIA_LIBRARIES)
+            message(WARNING "在 ${SKIA_LIB_DIR} 中未找到库文件")
             # 列出目录中的所有文件用于调试
-            file(GLOB DEBUG_FILES "${SKDN_LIB_DIR}/*")
+            file(GLOB DEBUG_FILES "${SKIA_LIB_DIR}/*")
             message(STATUS "目录中的文件:")
             foreach(debug_file ${DEBUG_FILES})
                 get_filename_component(debug_filename "${debug_file}" NAME)
@@ -594,10 +579,9 @@ jobs:
         # 根据平台设置特定的链接库和编译选项
         if(WIN32)
             # Windows平台配置 - 启用DirectX、Vulkan、OpenGL支持
-            target_compile_definitions(Skdn INTERFACE
+            target_compile_definitions(Skia INTERFACE
                 SK_GANESH=1
                 SK_GRAPHITE=1
-                SK_DAWN=1
                 SK_VULKAN=1
                 SK_GL=1
                 SK_BUILD_FOR_WIN=1
@@ -608,7 +592,7 @@ jobs:
             )
             
             # 设置MSVC特定的编译选项
-            target_compile_options(Skdn INTERFACE
+            target_compile_options(Skia INTERFACE
                 $<$<CXX_COMPILER_ID:MSVC>:/utf-8>        # 使用UTF-8编码
                 $<$<CXX_COMPILER_ID:MSVC>:/permissive->  # 严格C++标准符合性
                 $<$<CXX_COMPILER_ID:MSVC>:/Zc:__cplusplus> # 正确设置__cplusplus宏
@@ -619,15 +603,15 @@ jobs:
             )
             
             # 移除MSVC不支持的LTO选项，设置适当的优化
-            target_compile_options(Skdn INTERFACE
+            target_compile_options(Skia INTERFACE
                 $<$<CONFIG:Debug>:/Od>
                 $<$<CONFIG:Release>:/O2 /DNDEBUG>
                 $<$<CONFIG:RelWithDebInfo>:/O2 /DNDEBUG>
             )
             
             # 添加Windows系统库（包含DirectX和其他图形API）
-            target_link_libraries(Skdn INTERFACE
-                ${SKDN_LIBRARIES}
+            target_link_libraries(Skia INTERFACE
+                ${SKIA_LIBRARIES}
                 # OpenGL相关
                 OpenGL32
                 # DirectX相关
@@ -660,11 +644,10 @@ jobs:
             
         elseif(ANDROID)
             # Android平台配置 - 启用Vulkan、OpenGL ES支持
-            target_compile_definitions(Skdn INTERFACE
+            target_compile_definitions(Skia INTERFACE
                 ANDROID
                 SK_GANESH=1
                 SK_GRAPHITE=1
-                SK_DAWN=1
                 SK_VULKAN=1
                 SK_GL=1
                 SK_BUILD_FOR_ANDROID=1
@@ -673,15 +656,15 @@ jobs:
                 __ANDROID_API__=21
             )
             
-            target_compile_options(Skdn INTERFACE
+            target_compile_options(Skia INTERFACE
                 -fPIC
                 -fno-rtti
                 -fno-exceptions
                 $<$<CXX_COMPILER_ID:Clang>:-fcolor-diagnostics>
             )
             
-            target_link_libraries(Skdn INTERFACE
-                ${SKDN_LIBRARIES}
+            target_link_libraries(Skia INTERFACE
+                ${SKIA_LIBRARIES}
                 # OpenGL ES相关
                 GLESv2
                 GLESv3
@@ -701,17 +684,16 @@ jobs:
             )
             
             # Android特定的链接选项
-            target_link_options(Skdn INTERFACE
+            target_link_options(Skia INTERFACE
                 -Wl,--gc-sections
                 -Wl,--as-needed
             )
             
         else()
             # Linux平台配置 - 启用Vulkan、OpenGL、X11、Wayland支持
-            target_compile_definitions(Skdn INTERFACE
+            target_compile_definitions(Skia INTERFACE
                 SK_GANESH=1
                 SK_GRAPHITE=1
-                SK_DAWN=1
                 SK_VULKAN=1
                 SK_GL=1
                 SK_BUILD_FOR_UNIX=1
@@ -720,20 +702,20 @@ jobs:
             )
             
             # 设置GCC和Clang特定的编译选项
-            target_compile_options(Skdn INTERFACE
+            target_compile_options(Skia INTERFACE
                 $<$<CXX_COMPILER_ID:GNU>:-fdiagnostics-color=always>
                 $<$<CXX_COMPILER_ID:Clang>:-fcolor-diagnostics>
                 $<$<CXX_COMPILER_ID:Clang>:-stdlib=libc++>
             )
             
             # Linux平台的LTO支持
-            target_compile_options(Skdn INTERFACE
+            target_compile_options(Skia INTERFACE
                 $<$<CONFIG:Debug>:-g -O0>
                 $<$<CONFIG:Release>:-O3 -DNDEBUG -flto>
                 $<$<CONFIG:RelWithDebInfo>:-O2 -g -DNDEBUG -flto>
             )
             
-            target_link_options(Skdn INTERFACE
+            target_link_options(Skia INTERFACE
                 $<$<CONFIG:Release>:-flto>
                 $<$<CONFIG:RelWithDebInfo>:-flto>
             )
@@ -752,8 +734,8 @@ jobs:
             # 查找X11相关库
             find_package(X11 QUIET)
             
-            target_link_libraries(Skdn INTERFACE
-                ${SKDN_LIBRARIES}
+            target_link_libraries(Skia INTERFACE
+                ${SKIA_LIBRARIES}
                 # OpenGL
                 GL
                 # 系统库
@@ -767,70 +749,70 @@ jobs:
             
             # FontConfig支持
             if(FONTCONFIG_FOUND)
-                target_link_libraries(Skdn INTERFACE ${FONTCONFIG_LIBRARIES})
-                target_include_directories(Skdn INTERFACE ${FONTCONFIG_INCLUDE_DIRS})
+                target_link_libraries(Skia INTERFACE ${FONTCONFIG_LIBRARIES})
+                target_include_directories(Skia INTERFACE ${FONTCONFIG_INCLUDE_DIRS})
             endif()
             
             # HarfBuzz支持
             if(HARFBUZZ_FOUND)
-                target_link_libraries(Skdn INTERFACE ${HARFBUZZ_LIBRARIES})
-                target_include_directories(Skdn INTERFACE ${HARFBUZZ_INCLUDE_DIRS})
+                target_link_libraries(Skia INTERFACE ${HARFBUZZ_LIBRARIES})
+                target_include_directories(Skia INTERFACE ${HARFBUZZ_INCLUDE_DIRS})
             endif()
             
             # 添加Vulkan支持
             if(Vulkan_FOUND)
-                target_link_libraries(Skdn INTERFACE ${Vulkan_LIBRARIES})
-                target_include_directories(Skdn INTERFACE ${Vulkan_INCLUDE_DIRS})
+                target_link_libraries(Skia INTERFACE ${Vulkan_LIBRARIES})
+                target_include_directories(Skia INTERFACE ${Vulkan_INCLUDE_DIRS})
             endif()
             
             # 添加X11支持
             if(X11_FOUND)
-                target_link_libraries(Skdn INTERFACE
+                target_link_libraries(Skia INTERFACE
                     ${X11_LIBRARIES}
                     ${X11_Xrandr_LIB}
                     ${X11_Xinerama_LIB}
                     ${X11_Xcursor_LIB}
                     ${X11_Xi_LIB}
                 )
-                target_include_directories(Skdn INTERFACE ${X11_INCLUDE_DIR})
+                target_include_directories(Skia INTERFACE ${X11_INCLUDE_DIR})
             endif()
             
             # 添加Wayland支持
             if(WAYLAND_FOUND)
-                target_link_libraries(Skdn INTERFACE ${WAYLAND_LIBRARIES})
-                target_include_directories(Skdn INTERFACE ${WAYLAND_INCLUDE_DIRS})
+                target_link_libraries(Skia INTERFACE ${WAYLAND_LIBRARIES})
+                target_include_directories(Skia INTERFACE ${WAYLAND_INCLUDE_DIRS})
             endif()
         endif()
         
         # 设置编译选项
-        target_compile_features(Skdn INTERFACE cxx_std_20)
+        target_compile_features(Skia INTERFACE cxx_std_20)
         
         # 设置预处理器定义
-        target_compile_definitions(Skdn INTERFACE
+        target_compile_definitions(Skia INTERFACE
             $<$<CONFIG:Debug>:SK_DEBUG>
             $<$<CONFIG:Release>:SK_RELEASE>
         )
         
         # 输出详细配置信息
-        message(STATUS "Skdn配置信息:")
-        message(STATUS "  平台: ${SKDN_PLATFORM}")
-        message(STATUS "  架构: ${SKDN_ARCH}")
-        message(STATUS "  C++标准: C++20（Dawn WebGPU要求）")
+        message(STATUS "Skia配置信息:")
+        message(STATUS "  平台: ${SKIA_PLATFORM}")
+        message(STATUS "  架构: ${SKIA_ARCH}")
+        message(STATUS "  C++标准: C++20")
         message(STATUS "  编译器: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
-        message(STATUS "  库目录: ${SKDN_LIB_DIR}")
-        message(STATUS "  二进制目录: ${SKDN_BIN_DIR}")
-        message(STATUS "  头文件目录: ${SKDN_ROOT_DIR}/include")
-        message(STATUS "  GPU后端: Ganesh + Graphite + Dawn WebGPU（需要外部Dawn库）")
+        message(STATUS "  库目录: ${SKIA_LIB_DIR}")
+        message(STATUS "  二进制目录: ${SKIA_BIN_DIR}")
+        message(STATUS "  头文件目录: ${SKIA_ROOT_DIR}/include")
+        message(STATUS "  GPU后端: Ganesh + Graphite（不包含Dawn）")
         
-        if(SKDN_LIBRARIES)
-            list(LENGTH SKDN_LIBRARIES lib_count)
+        if(SKIA_LIBRARIES)
+            list(LENGTH SKIA_LIBRARIES lib_count)
             message(STATUS "  找到的库文件数量: ${lib_count}")
             message(STATUS "  核心库文件:")
-            foreach(lib ${SKDN_SKIA_LIBRARIES})
+            foreach(lib ${SKIA_CORE_LIBRARIES})
                 get_filename_component(lib_name "${lib}" NAME)
                 message(STATUS "    Skia - ${lib_name}")
             endforeach()
-            foreach(lib ${SKDN_GRAPHITE_LIBRARIES})
+            foreach(lib ${SKIA_GRAPHITE_LIBRARIES})
                 get_filename_component(lib_name "${lib}" NAME)
                 message(STATUS "    Graphite - ${lib_name}")
             endforeach()
@@ -838,27 +820,28 @@ jobs:
             message(WARNING "  未找到任何库文件!")
         endif()
         
-        message(STATUS "注意: 需要在项目中单独链接Dawn WebGPU库")
+        message(STATUS "说明: 这是纯Skia版本，不包含Dawn WebGPU支持")
+        message(STATUS "      如需Dawn支持，请在项目中单独添加Dawn库")
         EOF
         
     # 创建构建信息文件
     - name: 创建构建信息文件
       run: |
-        cat > Skdn/BUILD_INFO.txt << EOF
-        Skia 全平台预编译库（启用Dawn/Graphite/Ganesh后端）
-        ==================================================
+        cat > Skia/BUILD_INFO.txt << EOF
+        Skia 全平台预编译库（纯Skia版本，不包含Dawn）
+        =============================================
         
         重要说明:
         =========
-        ✅ 启用了Dawn WebGPU后端支持（需要外部Dawn库）
-        ✅ 启用了Graphite现代GPU后端
+        ✅ 仅包含Skia核心功能和Graphite后端
         ✅ 启用了Ganesh传统GPU后端
+        ✅ 启用了Graphite现代GPU后端
         ✅ 包含完整的Skia头文件和模块头文件
-        ✅ 未包含Dawn头文件（需要在项目中单独管理）
+        ❌ 不包含Dawn WebGPU支持
         
         目录结构:
         =========
-        Skdn/
+        Skia/
         ├── bin/                   # 二进制文件目录（按平台组织）
         │   ├── Win/x64/          # Windows x64 二进制文件
         │   ├── Linux/x64/        # Linux x64 二进制文件
@@ -885,28 +868,44 @@ jobs:
         
         Dawn WebGPU集成说明:
         ===================
-        本预编译库启用了Dawn WebGPU后端支持，但不包含Dawn库本身。
-        您需要在项目中单独管理Dawn WebGPU库。
+        本预编译库不包含Dawn WebGPU支持，这样做是为了：
+        1. 简化GitHub Action构建流程
+        2. 避免Dawn动态CMake生成的复杂性
+        3. 让用户在本地项目中灵活管理Dawn库
         
-        推荐的集成方式:
-        1. 使用CMake FetchContent下载Dawn
-        2. 使用vcpkg安装Dawn
-        3. 手动编译和链接Dawn库
+        如需Dawn WebGPU支持，请在项目中单独添加：
         
         CMake使用方法:
         =============
         
-        基础集成：
+        基础集成（仅Skia）：
         \`\`\`cmake
         cmake_minimum_required(VERSION 3.20)
         
         set(CMAKE_CXX_STANDARD 20)
         set(CMAKE_CXX_STANDARD_REQUIRED ON)
         
-        # 添加Skdn预编译库
-        add_subdirectory(path/to/Skdn)
+        # 添加Skia预编译库
+        add_subdirectory(path/to/Skia)
         
-        # 添加Dawn WebGPU库（示例使用FetchContent）
+        # 创建你的项目
+        add_executable(MyApp main.cpp)
+        
+        # 链接Skia库
+        target_link_libraries(MyApp PRIVATE Skia::Skia)
+        \`\`\`
+        
+        与Dawn集成（在项目中单独添加Dawn）：
+        \`\`\`cmake
+        cmake_minimum_required(VERSION 3.20)
+        
+        set(CMAKE_CXX_STANDARD 20)
+        set(CMAKE_CXX_STANDARD_REQUIRED ON)
+        
+        # 添加Skia预编译库
+        add_subdirectory(path/to/Skia)
+        
+        # 添加Dawn WebGPU库（用户自己管理）
         include(FetchContent)
         FetchContent_Declare(
             dawn
@@ -918,9 +917,9 @@ jobs:
         # 创建你的项目
         add_executable(MyApp main.cpp)
         
-        # 链接Skdn库和Dawn库
+        # 链接Skia和Dawn库
         target_link_libraries(MyApp PRIVATE 
-            Skdn::Skdn
+            Skia::Skia
             dawn::webgpu_dawn
             dawn::dawncpp
         )
@@ -936,7 +935,7 @@ jobs:
         #include <include/gpu/graphite/Context.h>
         #include <include/gpu/graphite/Recorder.h>
         
-        // Dawn WebGPU头文件（来自外部Dawn库）
+        // Dawn WebGPU头文件（如果单独添加了Dawn）
         #include <webgpu/webgpu_cpp.h>
         #include <dawn/dawn_proc.h>
         
@@ -948,15 +947,13 @@ jobs:
             // 验证启用的后端
             static_assert(SK_GANESH == 1);     // Ganesh后端
             static_assert(SK_GRAPHITE == 1);   // Graphite后端
-            static_assert(SK_DAWN == 1);       // Dawn WebGPU后端
             
-            // 初始化Dawn（需要外部Dawn库）
-            dawnProcSetProcs(&dawn::native::GetProcs());
+            // Dawn相关代码（如果添加了Dawn）
+            // dawnProcSetProcs(&dawn::native::GetProcs());
+            // wgpu::Instance instance = wgpu::CreateInstance();
             
-            // 创建WebGPU实例
-            wgpu::Instance instance = wgpu::CreateInstance();
+            // 您的Skia渲染代码...
             
-            // 您的Skia + Dawn代码...
             return 0;
         }
         \`\`\`
@@ -967,7 +964,6 @@ jobs:
         // GPU后端宏定义
         #define SK_GANESH 1          // 传统GPU后端
         #define SK_GRAPHITE 1        // 现代GPU后端  
-        #define SK_DAWN 1            // Dawn WebGPU后端
         #define SK_VULKAN 1          // Vulkan支持
         #define SK_GL 1              // OpenGL支持
         \`\`\`
@@ -984,32 +980,32 @@ jobs:
         2. Skia Graphite库（*graphite*.lib, *graphite*.a）
         3. 其他Skia依赖库（自动包含）
         
-        注意：Dawn WebGPU库需要外部提供！
+        注意：Dawn WebGPU库需要用户在项目中单独管理！
         
         特殊说明:
         =========
-        - 启用了Dawn WebGPU后端但不包含Dawn库
+        - 纯Skia版本，简化了构建和集成流程
         - 自动检测平台并链接相应的图形API库
-        - C++20标准要求（Dawn WebGPU需要）
+        - C++20标准支持
         - 头文件只包含Skia相关内容
         - 跨平台统一接口，一次编写到处运行
         - 生产环境就绪，性能优化
-        - 需要在项目中单独集成Dawn WebGPU库
+        - 如需Dawn支持，请在项目中单独集成Dawn库
         EOF
         
     # 打包统一的Skia构建包
-    - name: 打包Skdn_Prebuilt.zip
+    - name: 打包Skia_Prebuilt.zip
       run: |
-        zip -r "Skdn_Prebuilt.zip" Skdn/
-        echo "✅ Skdn_Prebuilt.zip 统一构建包创建完成"
-        ls -lh Skdn_Prebuilt.zip
+        zip -r "Skia_Prebuilt.zip" Skia/
+        echo "✅ Skia_Prebuilt.zip 统一构建包创建完成"
+        ls -lh Skia_Prebuilt.zip
         
     # 上传统一构建包
-    - name: 上传Skdn统一构建包
+    - name: 上传Skia统一构建包
       uses: actions/upload-artifact@v4
       with:
-        name: Skdn_Prebuilt
-        path: Skdn_Prebuilt.zip
+        name: Skia_Prebuilt
+        path: Skia_Prebuilt.zip
         retention-days: 30
         compression-level: 0
 
@@ -1031,10 +1027,10 @@ jobs:
       uses: actions/checkout@v4
       
     # 下载统一构建包
-    - name: 下载Skdn统一构建包
+    - name: 下载Skia统一构建包
       uses: actions/download-artifact@v4
       with:
-        name: Skdn_Prebuilt
+        name: Skia_Prebuilt
         path: .
         
     # 获取发布标签
@@ -1042,11 +1038,11 @@ jobs:
       id: get_tag
       run: |
         if [ "${{ github.event_name }}" = "schedule" ]; then
-          echo "tag=skdn-prebuilt-daily-$(date +%Y%m%d)" >> $GITHUB_OUTPUT
-          echo "name=Skdn预编译统一包 每日构建 $(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
+          echo "tag=skia-prebuilt-daily-$(date +%Y%m%d)" >> $GITHUB_OUTPUT
+          echo "name=Skia预编译统一包 每日构建 $(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
         else
-          echo "tag=skdn-prebuilt-v${{ github.run_number }}" >> $GITHUB_OUTPUT
-          echo "name=Skdn预编译统一包 v${{ github.run_number }}" >> $GITHUB_OUTPUT
+          echo "tag=skia-prebuilt-v${{ github.run_number }}" >> $GITHUB_OUTPUT
+          echo "name=Skia预编译统一包 v${{ github.run_number }}" >> $GITHUB_OUTPUT
         fi
         
     # 创建GitHub Release发布版本
@@ -1056,32 +1052,33 @@ jobs:
         tag_name: ${{ steps.get_tag.outputs.tag }}
         name: ${{ steps.get_tag.outputs.name }}
         body: |
-          # Skia 全平台预编译库（启用Dawn/Graphite/Ganesh后端）
+          # Skia 全平台预编译库（纯Skia版本）
           
-          这是包含完整Skia的全平台预编译库，**启用了Dawn WebGPU、Graphite、Ganesh三重GPU后端支持**，但不包含Dawn库本身，需要在项目中单独集成Dawn WebGPU库。
+          这是包含完整Skia的全平台预编译库，**仅包含Skia核心功能和Graphite后端**，不包含Dawn WebGPU支持，简化了构建和集成流程。
           
-          ## 🔧 重要特性
+          ## 🎯 设计理念
           
-          ### ✅ 三重GPU后端支持
-          - **Ganesh后端** - Skia传统GPU后端，成熟稳定
-          - **Graphite后端** - Skia现代GPU后端，性能优化
-          - **Dawn WebGPU后端** - 面向未来的跨平台GPU API支持
+          ### ✅ 简化构建流程
+          - **仅编译Skia** - 避免Dawn动态CMake生成的复杂性
+          - **简化Action** - 减少GitHub Action构建时间和复杂度
+          - **用户自由选择** - 让用户在本地项目中自由管理Dawn库
           
-          ### 🚀 Dawn WebGPU集成说明
-          - **启用Dawn支持** - Skia编译时已启用Dawn WebGPU后端
-          - **外部Dawn库** - 需要在项目中单独管理Dawn WebGPU库
-          - **灵活集成** - 支持多种Dawn库集成方式（FetchContent、vcpkg等）
+          ### 🚀 推荐使用方式
+          - **纯Skia渲染** - 使用Ganesh和Graphite后端进行高性能渲染
+          - **按需添加Dawn** - 如需WebGPU支持，在项目中单独添加Dawn
+          - **灵活集成** - 用户完全控制Dawn版本和配置
           
           ## 📦 包含内容
           
-          **Skdn_Prebuilt.zip** - 完整Skia预编译库（启用Dawn/Graphite/Ganesh后端）
+          **Skia_Prebuilt.zip** - 完整Skia预编译库（纯Skia版本）
           
           ## ✨ 主要特性
           
           ### 🔧 完整Skia功能支持
           - **Skia核心头文件** - 完整的Skia API头文件
           - **Skia模块头文件** - Skottie、SVG等模块支持
-          - **预编译库文件** - 按平台组织的库文件结构
+          - **Ganesh后端** - 传统GPU后端，成熟稳定
+          - **Graphite后端** - 现代GPU后端，性能优化
           
           ### 🎮 多图形API支持
           - **Windows**: DirectX 11/12 + Vulkan + OpenGL
@@ -1090,34 +1087,18 @@ jobs:
           
           ### 🚀 现代技术栈
           - **C++20标准** - 完整的现代C++特性支持
-          - **三重GPU后端** - Ganesh + Graphite + Dawn WebGPU
+          - **双GPU后端** - Ganesh + Graphite
           - **智能CMake配置** - 自动平台检测和库链接
           
           ## 📋 快速开始
           
           ### 1. 下载和解压
           ```bash
-          # 下载Skdn_Prebuilt.zip并解压到项目目录
-          unzip Skdn_Prebuilt.zip -d third_party/
+          # 下载Skia_Prebuilt.zip并解压到项目目录
+          unzip Skia_Prebuilt.zip -d third_party/
           ```
           
-          ### 2. 集成Dawn WebGPU库
-          ```cmake
-          # 方式1: 使用FetchContent（推荐）
-          include(FetchContent)
-          FetchContent_Declare(
-              dawn
-              GIT_REPOSITORY https://dawn.googlesource.com/dawn.git
-              GIT_TAG main
-          )
-          FetchContent_MakeAvailable(dawn)
-          
-          # 方式2: 使用vcpkg
-          # vcpkg install dawn
-          # find_package(dawn CONFIG REQUIRED)
-          ```
-          
-          ### 3. CMake集成
+          ### 2. 仅使用Skia（推荐）
           ```cmake
           cmake_minimum_required(VERSION 3.20)
           project(MyApp)
@@ -1126,18 +1107,43 @@ jobs:
           set(CMAKE_CXX_STANDARD 20)
           set(CMAKE_CXX_STANDARD_REQUIRED ON)
           
-          # 添加Skdn库
-          add_subdirectory(third_party/Skdn)
-          
-          # 添加Dawn库（选择上面的方式之一）
-          # ...
+          # 添加Skia库
+          add_subdirectory(third_party/Skia)
           
           # 创建你的应用
           add_executable(MyApp src/main.cpp)
           
-          # 链接Skdn库和Dawn库
+          # 链接Skia库
+          target_link_libraries(MyApp PRIVATE Skia::Skia)
+          ```
+          
+          ### 3. Skia + Dawn集成
+          ```cmake
+          cmake_minimum_required(VERSION 3.20)
+          project(MyApp)
+          
+          # 设置C++20标准
+          set(CMAKE_CXX_STANDARD 20)
+          set(CMAKE_CXX_STANDARD_REQUIRED ON)
+          
+          # 添加Skia库
+          add_subdirectory(third_party/Skia)
+          
+          # 添加Dawn库（用户自己管理）
+          include(FetchContent)
+          FetchContent_Declare(
+              dawn
+              GIT_REPOSITORY https://dawn.googlesource.com/dawn.git
+              GIT_TAG main
+          )
+          FetchContent_MakeAvailable(dawn)
+          
+          # 创建你的应用
+          add_executable(MyApp src/main.cpp)
+          
+          # 链接Skia和Dawn库
           target_link_libraries(MyApp PRIVATE 
-              Skdn::Skdn
+              Skia::Skia
               dawn::webgpu_dawn
               dawn::dawncpp
           )
@@ -1145,14 +1151,14 @@ jobs:
           
           ### 4. 代码使用示例
           ```cpp
-          // Skia核心头文件（来自预编译库）
+          // Skia核心头文件
           #include <include/core/SkCanvas.h>
           #include <include/core/SkSurface.h>
           #include <include/gpu/GrDirectContext.h>
           #include <include/gpu/graphite/Context.h>
           #include <include/gpu/graphite/Recorder.h>
           
-          // Dawn WebGPU头文件（来自外部Dawn库）
+          // Dawn WebGPU头文件（如果单独添加了Dawn）
           #include <webgpu/webgpu_cpp.h>
           #include <dawn/dawn_proc.h>
           
@@ -1160,16 +1166,12 @@ jobs:
               // 验证启用的后端
               static_assert(SK_GANESH == 1);     // Ganesh后端
               static_assert(SK_GRAPHITE == 1);   // Graphite后端
-              static_assert(SK_DAWN == 1);       // Dawn WebGPU后端
               
-              // 初始化Dawn（需要外部Dawn库）
-              dawnProcSetProcs(&dawn::native::GetProcs());
+              // Dawn相关代码（如果添加了Dawn）
+              // dawnProcSetProcs(&dawn::native::GetProcs());
+              // wgpu::Instance instance = wgpu::CreateInstance();
               
-              // 创建WebGPU实例
-              wgpu::Instance instance = wgpu::CreateInstance();
-              
-              // 创建Skia Graphite上下文
-              // skgpu::graphite::ContextFactory::MakeDawn(dawnContext);
+              // 您的Skia渲染代码...
               
               return 0;
           }
@@ -1211,7 +1213,7 @@ jobs:
           ## 📁 目录结构
           
           ```
-          Skdn/
+          Skia/
           ├── bin/                   # 二进制文件（按平台组织）
           │   ├── Win/x64/          # Windows x64
           │   ├── Linux/x64/        # Linux x64  
@@ -1228,7 +1230,12 @@ jobs:
           
           ## 💡 Dawn WebGPU集成建议
           
-          ### 推荐集成方式
+          ### 为什么不包含Dawn？
+          1. **避免复杂性** - Dawn会动态生成CMake项目，在Action中难以处理
+          2. **用户自由度** - 让用户选择合适的Dawn版本和配置
+          3. **简化构建** - 减少GitHub Action构建时间和复杂度
+          
+          ### 推荐的Dawn集成方式
           
           #### 1. FetchContent方式（推荐）
           ```cmake
@@ -1251,30 +1258,21 @@ jobs:
           vcpkg install dawn
           ```
           
-          ### Dawn库链接
-          ```cmake
-          target_link_libraries(MyApp PRIVATE 
-              Skdn::Skdn           # Skia预编译库
-              dawn::webgpu_dawn    # Dawn WebGPU核心库
-              dawn::dawncpp        # Dawn C++绑定
-          )
-          ```
+          ## 🎯 优势对比
           
-          ## 🎯 重要优势
-          
-          | 特性 | 说明 |
-          |------|------|
-          | 三重GPU后端 | Ganesh + Graphite + Dawn WebGPU |
-          | 灵活Dawn集成 | 支持多种Dawn库管理方式 |
-          | 预编译优化 | 无需编译Skia，快速集成 |
-          | 跨平台支持 | Windows、Linux、Android |
-          | 现代C++20 | 完整的现代C++特性支持 |
+          | 特性 | 纯Skia版本 | Skia+Dawn混合版本 |
+          |------|------------|-------------------|
+          | 构建简单性 | ✅ 非常简单 | ❌ 复杂 |
+          | 用户自由度 | ✅ 完全自由 | ❌ 受限 |
+          | Dawn版本控制 | ✅ 用户控制 | ❌ 固定版本 |
+          | 构建时间 | ✅ 快速 | ❌ 缓慢 |
+          | 维护成本 | ✅ 低 | ❌ 高 |
           
           ---
           
-          > **🚀 开始使用**: 下载Skdn_Prebuilt.zip，按照您的需求选择合适的Dawn WebGPU库集成方式，享受Skia的强大图形功能和Dawn WebGPU的现代GPU特性！
+          > **🚀 推荐使用**: 下载Skia_Prebuilt.zip，在项目中按需添加Dawn WebGPU支持，享受Skia强大的2D图形功能和灵活的架构！
         files: |
-          Skdn_Prebuilt.zip
+          Skia_Prebuilt.zip
         draft: false
         prerelease: false
         generate_release_notes: false
