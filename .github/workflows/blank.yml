@@ -1,4 +1,4 @@
-name: Build Skia and Dawn
+name: 构建Skia和Dawn
 
 on:
   push:
@@ -41,11 +41,11 @@ jobs:
         git config --global user.name "GitHub Action"
         git config --global user.email "action@github.com"
 
-    - name: 设置MSVC环境 (MSVC编译器)
+    - name: 设置MSVC环境
       if: matrix.compiler == 'msvc2022'
-      uses: microsoft/setup-msbuild@v1.3
+      uses: microsoft/setup-msbuild@v2
 
-    - name: 设置Clang环境 (Clang编译器)
+    - name: 设置Clang环境
       if: matrix.compiler == 'clang18'
       run: |
         # 下载并安装LLVM/Clang 18
@@ -69,50 +69,50 @@ jobs:
         python tools/git-sync-deps
         
         # 配置编译参数
-        $gn_args = @()
-        $gn_args += "is_official_build=true"
-        $gn_args += "is_component_build=false"
-        $gn_args += "target_cpu=`"x64`""
-        $gn_args += "cc=`"clang`""
-        $gn_args += "cxx=`"clang++`""
-        $gn_args += "clang_use_chrome_plugins=false"
-        $gn_args += "extra_cflags_cc=[`"-std=c++20`"]"
+        $gnArgs = @()
+        $gnArgs += "is_official_build=true"
+        $gnArgs += "is_component_build=false"
+        $gnArgs += "target_cpu=`"x64`""
+        $gnArgs += "cc=`"clang`""
+        $gnArgs += "cxx=`"clang++`""
+        $gnArgs += "clang_use_chrome_plugins=false"
+        $gnArgs += "extra_cflags_cc=[`"-std=c++20`"]"
         
         # 根据编译器设置
         if ("${{ matrix.compiler }}" -eq "msvc2022") {
-          $gn_args += "win_vc=`"2022`""
-          $gn_args += "is_clang=false"
+          $gnArgs += "win_vc=`"2022`""
+          $gnArgs += "is_clang=false"
         } else {
-          $gn_args += "is_clang=true"
+          $gnArgs += "is_clang=true"
         }
         
         # 根据后端设置
         switch ("${{ matrix.backend }}") {
           "dx12" { 
-            $gn_args += "skia_use_direct3d=true"
-            $gn_args += "skia_use_dawn=true"
+            $gnArgs += "skia_use_direct3d=true"
+            $gnArgs += "skia_use_dawn=true"
           }
           "dx11" { 
-            $gn_args += "skia_use_direct3d=true"
+            $gnArgs += "skia_use_direct3d=true"
           }
           "vulkan" { 
-            $gn_args += "skia_use_vulkan=true"
+            $gnArgs += "skia_use_vulkan=true"
           }
           "opengl" { 
-            $gn_args += "skia_use_gl=true"
+            $gnArgs += "skia_use_gl=true"
           }
         }
         
-        $gn_args += "skia_use_system_harfbuzz=false"
-        $gn_args += "skia_use_system_icu=false"
-        $gn_args += "skia_use_system_libjpeg_turbo=false"
-        $gn_args += "skia_use_system_libpng=false"
-        $gn_args += "skia_use_system_libwebp=false"
-        $gn_args += "skia_use_system_zlib=false"
+        $gnArgs += "skia_use_system_harfbuzz=false"
+        $gnArgs += "skia_use_system_icu=false"
+        $gnArgs += "skia_use_system_libjpeg_turbo=false"
+        $gnArgs += "skia_use_system_libpng=false"
+        $gnArgs += "skia_use_system_libwebp=false"
+        $gnArgs += "skia_use_system_zlib=false"
         
         # 生成构建文件
-        $args_string = $gn_args -join " "
-        gn gen out/Release --args="$args_string"
+        $argsString = $gnArgs -join " "
+        gn gen out/Release --args="$argsString"
         
         # 编译Skia
         ninja -C out/Release
@@ -131,52 +131,52 @@ jobs:
         gclient sync
         
         # 配置CMake编译参数
-        $cmake_args = @()
-        $cmake_args += "-DCMAKE_BUILD_TYPE=Release"
-        $cmake_args += "-DCMAKE_CXX_STANDARD=20"
-        $cmake_args += "-DDAWN_FETCH_DEPENDENCIES=ON"
-        $cmake_args += "-DDAWN_USE_GLFW=OFF"
-        $cmake_args += "-DTINT_BUILD_TESTS=OFF"
-        $cmake_args += "-DDAWN_BUILD_SAMPLES=OFF"
+        $cmakeArgs = @()
+        $cmakeArgs += "-DCMAKE_BUILD_TYPE=Release"
+        $cmakeArgs += "-DCMAKE_CXX_STANDARD=20"
+        $cmakeArgs += "-DDAWN_FETCH_DEPENDENCIES=ON"
+        $cmakeArgs += "-DDAWN_USE_GLFW=OFF"
+        $cmakeArgs += "-DTINT_BUILD_TESTS=OFF"
+        $cmakeArgs += "-DDAWN_BUILD_SAMPLES=OFF"
         
         # 根据编译器设置
         if ("${{ matrix.compiler }}" -eq "clang18") {
-          $cmake_args += "-DCMAKE_C_COMPILER=clang"
-          $cmake_args += "-DCMAKE_CXX_COMPILER=clang++"
+          $cmakeArgs += "-DCMAKE_C_COMPILER=clang"
+          $cmakeArgs += "-DCMAKE_CXX_COMPILER=clang++"
         }
         
         # 根据后端设置
         switch ("${{ matrix.backend }}") {
           "dx12" { 
-            $cmake_args += "-DDAWN_ENABLE_D3D12=ON"
-            $cmake_args += "-DDAWN_ENABLE_D3D11=OFF"
-            $cmake_args += "-DDAWN_ENABLE_VULKAN=OFF"
-            $cmake_args += "-DDAWN_ENABLE_OPENGL=OFF"
+            $cmakeArgs += "-DDAWN_ENABLE_D3D12=ON"
+            $cmakeArgs += "-DDAWN_ENABLE_D3D11=OFF"
+            $cmakeArgs += "-DDAWN_ENABLE_VULKAN=OFF"
+            $cmakeArgs += "-DDAWN_ENABLE_OPENGL=OFF"
           }
           "dx11" { 
-            $cmake_args += "-DDAWN_ENABLE_D3D11=ON"
-            $cmake_args += "-DDAWN_ENABLE_D3D12=OFF"
-            $cmake_args += "-DDAWN_ENABLE_VULKAN=OFF"
-            $cmake_args += "-DDAWN_ENABLE_OPENGL=OFF"
+            $cmakeArgs += "-DDAWN_ENABLE_D3D11=ON"
+            $cmakeArgs += "-DDAWN_ENABLE_D3D12=OFF"
+            $cmakeArgs += "-DDAWN_ENABLE_VULKAN=OFF"
+            $cmakeArgs += "-DDAWN_ENABLE_OPENGL=OFF"
           }
           "vulkan" { 
-            $cmake_args += "-DDAWN_ENABLE_VULKAN=ON"
-            $cmake_args += "-DDAWN_ENABLE_D3D12=OFF"
-            $cmake_args += "-DDAWN_ENABLE_D3D11=OFF"
-            $cmake_args += "-DDAWN_ENABLE_OPENGL=OFF"
+            $cmakeArgs += "-DDAWN_ENABLE_VULKAN=ON"
+            $cmakeArgs += "-DDAWN_ENABLE_D3D12=OFF"
+            $cmakeArgs += "-DDAWN_ENABLE_D3D11=OFF"
+            $cmakeArgs += "-DDAWN_ENABLE_OPENGL=OFF"
           }
           "opengl" { 
-            $cmake_args += "-DDAWN_ENABLE_OPENGL=ON"
-            $cmake_args += "-DDAWN_ENABLE_D3D12=OFF"
-            $cmake_args += "-DDAWN_ENABLE_D3D11=OFF"
-            $cmake_args += "-DDAWN_ENABLE_VULKAN=OFF"
+            $cmakeArgs += "-DDAWN_ENABLE_OPENGL=ON"
+            $cmakeArgs += "-DDAWN_ENABLE_D3D12=OFF"
+            $cmakeArgs += "-DDAWN_ENABLE_D3D11=OFF"
+            $cmakeArgs += "-DDAWN_ENABLE_VULKAN=OFF"
           }
         }
         
         # 生成构建文件
         mkdir build
         cd build
-        cmake .. $cmake_args -G "Ninja"
+        cmake .. $cmakeArgs -G "Ninja"
         
         # 编译Dawn
         ninja
@@ -216,7 +216,7 @@ jobs:
 
     - name: 创建CMakeLists.txt
       run: |
-        $cmake_content = @"
+        $cmakeContent = @"
 cmake_minimum_required(VERSION 3.20)
 project(SkiaDawn VERSION 1.0.0 LANGUAGES CXX)
 
@@ -329,7 +329,7 @@ endif()
 export(TARGETS Skia DawnDym FILE SkiaDawnTargets.cmake)
 "@
         
-        $cmake_content | Out-File -FilePath "Skia/CMakeLists.txt" -Encoding utf8
+        $cmakeContent | Out-File -FilePath "Skia/CMakeLists.txt" -Encoding utf8
 
     - name: 上传构建产物
       uses: actions/upload-artifact@v4
@@ -410,43 +410,43 @@ export(TARGETS Skia DawnDym FILE SkiaDawnTargets.cmake)
         python3 tools/git-sync-deps
         
         # 配置编译参数
-        gn_args=""
-        gn_args="$gn_args is_official_build=true"
-        gn_args="$gn_args is_component_build=false"
-        gn_args="$gn_args target_cpu=\"x64\""
-        gn_args="$gn_args extra_cflags_cc=[\"-std=c++20\"]"
+        gnArgs=""
+        gnArgs="$gnArgs is_official_build=true"
+        gnArgs="$gnArgs is_component_build=false"
+        gnArgs="$gnArgs target_cpu=\"x64\""
+        gnArgs="$gnArgs extra_cflags_cc=[\"-std=c++20\"]"
         
         # 根据编译器设置
         if [ "${{ matrix.compiler }}" = "gcc13" ]; then
-          gn_args="$gn_args is_clang=false"
-          gn_args="$gn_args cc=\"gcc\""
-          gn_args="$gn_args cxx=\"g++\""
+          gnArgs="$gnArgs is_clang=false"
+          gnArgs="$gnArgs cc=\"gcc\""
+          gnArgs="$gnArgs cxx=\"g++\""
         else
-          gn_args="$gn_args is_clang=true"
-          gn_args="$gn_args cc=\"clang\""
-          gn_args="$gn_args cxx=\"clang++\""
-          gn_args="$gn_args clang_use_chrome_plugins=false"
+          gnArgs="$gnArgs is_clang=true"
+          gnArgs="$gnArgs cc=\"clang\""
+          gnArgs="$gnArgs cxx=\"clang++\""
+          gnArgs="$gnArgs clang_use_chrome_plugins=false"
         fi
         
         # 根据后端设置
         case "${{ matrix.backend }}" in
           "vulkan")
-            gn_args="$gn_args skia_use_vulkan=true"
+            gnArgs="$gnArgs skia_use_vulkan=true"
             ;;
           "opengl")
-            gn_args="$gn_args skia_use_gl=true"
+            gnArgs="$gnArgs skia_use_gl=true"
             ;;
         esac
         
-        gn_args="$gn_args skia_use_system_harfbuzz=false"
-        gn_args="$gn_args skia_use_system_icu=false"
-        gn_args="$gn_args skia_use_system_libjpeg_turbo=false"
-        gn_args="$gn_args skia_use_system_libpng=false"
-        gn_args="$gn_args skia_use_system_libwebp=false"
-        gn_args="$gn_args skia_use_system_zlib=false"
+        gnArgs="$gnArgs skia_use_system_harfbuzz=false"
+        gnArgs="$gnArgs skia_use_system_icu=false"
+        gnArgs="$gnArgs skia_use_system_libjpeg_turbo=false"
+        gnArgs="$gnArgs skia_use_system_libpng=false"
+        gnArgs="$gnArgs skia_use_system_libwebp=false"
+        gnArgs="$gnArgs skia_use_system_zlib=false"
         
         # 生成构建文件
-        gn gen out/Release --args="$gn_args"
+        gn gen out/Release --args="$gnArgs"
         
         # 编译Skia
         ninja -C out/Release
@@ -465,39 +465,39 @@ export(TARGETS Skia DawnDym FILE SkiaDawnTargets.cmake)
         gclient sync
         
         # 配置CMake编译参数
-        cmake_args=""
-        cmake_args="$cmake_args -DCMAKE_BUILD_TYPE=Release"
-        cmake_args="$cmake_args -DCMAKE_CXX_STANDARD=20"
-        cmake_args="$cmake_args -DDAWN_FETCH_DEPENDENCIES=ON"
-        cmake_args="$cmake_args -DDAWN_USE_GLFW=OFF"
-        cmake_args="$cmake_args -DTINT_BUILD_TESTS=OFF"
-        cmake_args="$cmake_args -DDAWN_BUILD_SAMPLES=OFF"
+        cmakeArgs=""
+        cmakeArgs="$cmakeArgs -DCMAKE_BUILD_TYPE=Release"
+        cmakeArgs="$cmakeArgs -DCMAKE_CXX_STANDARD=20"
+        cmakeArgs="$cmakeArgs -DDAWN_FETCH_DEPENDENCIES=ON"
+        cmakeArgs="$cmakeArgs -DDAWN_USE_GLFW=OFF"
+        cmakeArgs="$cmakeArgs -DTINT_BUILD_TESTS=OFF"
+        cmakeArgs="$cmakeArgs -DDAWN_BUILD_SAMPLES=OFF"
         
         # 根据编译器设置
         if [ "${{ matrix.compiler }}" = "clang18" ]; then
-          cmake_args="$cmake_args -DCMAKE_C_COMPILER=clang"
-          cmake_args="$cmake_args -DCMAKE_CXX_COMPILER=clang++"
+          cmakeArgs="$cmakeArgs -DCMAKE_C_COMPILER=clang"
+          cmakeArgs="$cmakeArgs -DCMAKE_CXX_COMPILER=clang++"
         else
-          cmake_args="$cmake_args -DCMAKE_C_COMPILER=gcc"
-          cmake_args="$cmake_args -DCMAKE_CXX_COMPILER=g++"
+          cmakeArgs="$cmakeArgs -DCMAKE_C_COMPILER=gcc"
+          cmakeArgs="$cmakeArgs -DCMAKE_CXX_COMPILER=g++"
         fi
         
         # 根据后端设置
         case "${{ matrix.backend }}" in
           "vulkan")
-            cmake_args="$cmake_args -DDAWN_ENABLE_VULKAN=ON"
-            cmake_args="$cmake_args -DDAWN_ENABLE_OPENGL=OFF"
+            cmakeArgs="$cmakeArgs -DDAWN_ENABLE_VULKAN=ON"
+            cmakeArgs="$cmakeArgs -DDAWN_ENABLE_OPENGL=OFF"
             ;;
           "opengl")
-            cmake_args="$cmake_args -DDAWN_ENABLE_OPENGL=ON"
-            cmake_args="$cmake_args -DDAWN_ENABLE_VULKAN=OFF"
+            cmakeArgs="$cmakeArgs -DDAWN_ENABLE_OPENGL=ON"
+            cmakeArgs="$cmakeArgs -DDAWN_ENABLE_VULKAN=OFF"
             ;;
         esac
         
         # 生成构建文件
         mkdir build
         cd build
-        cmake .. $cmake_args -G "Ninja"
+        cmake .. $cmakeArgs -G "Ninja"
         
         # 编译Dawn
         ninja
@@ -535,7 +535,7 @@ export(TARGETS Skia DawnDym FILE SkiaDawnTargets.cmake)
         find skia-build/dawn/build -name "*.a" -exec cp {} Skia/lib/Linux/x64/ \; 2>/dev/null || true
         find skia-build/dawn/build -name "*.so" -exec cp {} Skia/bin/Linux/x64/ \; 2>/dev/null || true
 
-    - name: 创建CMakeLists.txt (Linux)
+    - name: 创建CMakeLists.txt
       run: |
         cat > Skia/CMakeLists.txt << 'EOF'
 cmake_minimum_required(VERSION 3.20)
@@ -683,7 +683,7 @@ EOF
         git config --global user.name "GitHub Action"
         git config --global user.email "action@github.com"
 
-    - name: 下载并编译Skia (Android)
+    - name: 下载并编译Skia
       run: |
         # 设置Android环境变量
         export ANDROID_NDK_ROOT=$ANDROID_NDK_LATEST_HOME
@@ -703,51 +703,51 @@ EOF
         
         # 设置架构
         if [ "${{ matrix.arch }}" = "arm64" ]; then
-          target_cpu="arm64"
-          android_abi="arm64-v8a"
+          targetCpu="arm64"
+          androidAbi="arm64-v8a"
         else
-          target_cpu="x64"
-          android_abi="x86_64"
+          targetCpu="x64"
+          androidAbi="x86_64"
         fi
         
         # 配置编译参数
-        gn_args=""
-        gn_args="$gn_args target_os=\"android\""
-        gn_args="$gn_args target_cpu=\"$target_cpu\""
-        gn_args="$gn_args is_official_build=true"
-        gn_args="$gn_args is_component_build=false"
-        gn_args="$gn_args is_clang=true"
-        gn_args="$gn_args clang_use_chrome_plugins=false"
-        gn_args="$gn_args extra_cflags_cc=[\"-std=c++20\"]"
-        gn_args="$gn_args android_ndk_root=\"$ANDROID_NDK_ROOT\""
-        gn_args="$gn_args ndk_api=21"
+        gnArgs=""
+        gnArgs="$gnArgs target_os=\"android\""
+        gnArgs="$gnArgs target_cpu=\"$targetCpu\""
+        gnArgs="$gnArgs is_official_build=true"
+        gnArgs="$gnArgs is_component_build=false"
+        gnArgs="$gnArgs is_clang=true"
+        gnArgs="$gnArgs clang_use_chrome_plugins=false"
+        gnArgs="$gnArgs extra_cflags_cc=[\"-std=c++20\"]"
+        gnArgs="$gnArgs android_ndk_root=\"$ANDROID_NDK_ROOT\""
+        gnArgs="$gnArgs ndk_api=21"
         
         # 根据后端设置
         case "${{ matrix.backend }}" in
           "vulkan")
-            gn_args="$gn_args skia_use_vulkan=true"
-            gn_args="$gn_args skia_use_gl=false"
+            gnArgs="$gnArgs skia_use_vulkan=true"
+            gnArgs="$gnArgs skia_use_gl=false"
             ;;
           "gles")
-            gn_args="$gn_args skia_use_gl=true"
-            gn_args="$gn_args skia_use_vulkan=false"
+            gnArgs="$gnArgs skia_use_gl=true"
+            gnArgs="$gnArgs skia_use_vulkan=false"
             ;;
         esac
         
-        gn_args="$gn_args skia_use_system_harfbuzz=false"
-        gn_args="$gn_args skia_use_system_icu=false"
-        gn_args="$gn_args skia_use_system_libjpeg_turbo=false"
-        gn_args="$gn_args skia_use_system_libpng=false"
-        gn_args="$gn_args skia_use_system_libwebp=false"
-        gn_args="$gn_args skia_use_system_zlib=false"
+        gnArgs="$gnArgs skia_use_system_harfbuzz=false"
+        gnArgs="$gnArgs skia_use_system_icu=false"
+        gnArgs="$gnArgs skia_use_system_libjpeg_turbo=false"
+        gnArgs="$gnArgs skia_use_system_libpng=false"
+        gnArgs="$gnArgs skia_use_system_libwebp=false"
+        gnArgs="$gnArgs skia_use_system_zlib=false"
         
         # 生成构建文件
-        gn gen out/Release --args="$gn_args"
+        gn gen out/Release --args="$gnArgs"
         
         # 编译Skia
         ninja -C out/Release
 
-    - name: 下载并编译Dawn (Android)
+    - name: 下载并编译Dawn
       run: |
         cd skia-build
         
@@ -766,59 +766,59 @@ EOF
         
         # 设置架构
         if [ "${{ matrix.arch }}" = "arm64" ]; then
-          android_abi="arm64-v8a"
+          androidAbi="arm64-v8a"
         else
-          android_abi="x86_64"
+          androidAbi="x86_64"
         fi
         
         # 配置CMake编译参数
-        cmake_args=""
-        cmake_args="$cmake_args -DCMAKE_BUILD_TYPE=Release"
-        cmake_args="$cmake_args -DCMAKE_CXX_STANDARD=20"
-        cmake_args="$cmake_args -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake"
-        cmake_args="$cmake_args -DANDROID_ABI=$android_abi"
-        cmake_args="$cmake_args -DANDROID_NATIVE_API_LEVEL=21"
-        cmake_args="$cmake_args -DANDROID_STL=c++_shared"
-        cmake_args="$cmake_args -DDAWN_FETCH_DEPENDENCIES=ON"
-        cmake_args="$cmake_args -DDAWN_USE_GLFW=OFF"
-        cmake_args="$cmake_args -DTINT_BUILD_TESTS=OFF"
-        cmake_args="$cmake_args -DDAWN_BUILD_SAMPLES=OFF"
+        cmakeArgs=""
+        cmakeArgs="$cmakeArgs -DCMAKE_BUILD_TYPE=Release"
+        cmakeArgs="$cmakeArgs -DCMAKE_CXX_STANDARD=20"
+        cmakeArgs="$cmakeArgs -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake"
+        cmakeArgs="$cmakeArgs -DANDROID_ABI=$androidAbi"
+        cmakeArgs="$cmakeArgs -DANDROID_NATIVE_API_LEVEL=21"
+        cmakeArgs="$cmakeArgs -DANDROID_STL=c++_shared"
+        cmakeArgs="$cmakeArgs -DDAWN_FETCH_DEPENDENCIES=ON"
+        cmakeArgs="$cmakeArgs -DDAWN_USE_GLFW=OFF"
+        cmakeArgs="$cmakeArgs -DTINT_BUILD_TESTS=OFF"
+        cmakeArgs="$cmakeArgs -DDAWN_BUILD_SAMPLES=OFF"
         
         # 根据后端设置
         case "${{ matrix.backend }}" in
           "vulkan")
-            cmake_args="$cmake_args -DDAWN_ENABLE_VULKAN=ON"
-            cmake_args="$cmake_args -DDAWN_ENABLE_OPENGLES=OFF"
+            cmakeArgs="$cmakeArgs -DDAWN_ENABLE_VULKAN=ON"
+            cmakeArgs="$cmakeArgs -DDAWN_ENABLE_OPENGLES=OFF"
             ;;
           "gles")
-            cmake_args="$cmake_args -DDAWN_ENABLE_OPENGLES=ON"
-            cmake_args="$cmake_args -DDAWN_ENABLE_VULKAN=OFF"
+            cmakeArgs="$cmakeArgs -DDAWN_ENABLE_OPENGLES=ON"
+            cmakeArgs="$cmakeArgs -DDAWN_ENABLE_VULKAN=OFF"
             ;;
         esac
         
         # 生成构建文件
         mkdir build
         cd build
-        cmake .. $cmake_args -G "Ninja"
+        cmake .. $cmakeArgs -G "Ninja"
         
         # 编译Dawn
         ninja
 
-    - name: 收集和打包文件 (Android)
+    - name: 收集和打包文件
       run: |
         # 设置架构目录
         if [ "${{ matrix.arch }}" = "arm64" ]; then
-          arch_dir="arm64"
+          archDir="arm64"
         else
-          arch_dir="x64"
+          archDir="x64"
         fi
         
         # 创建输出目录结构
         mkdir -p Skia/include/skia
         mkdir -p Skia/include/dawn
         mkdir -p Skia/include/modules
-        mkdir -p Skia/bin/Android/$arch_dir
-        mkdir -p Skia/lib/Android/$arch_dir
+        mkdir -p Skia/bin/Android/$archDir
+        mkdir -p Skia/lib/Android/$archDir
         
         # 复制Skia头文件
         cp -r skia-build/skia/include/* Skia/include/skia/
@@ -829,8 +829,8 @@ EOF
         fi
         
         # 复制Skia库文件
-        cp skia-build/skia/out/Release/*.a Skia/lib/Android/$arch_dir/ 2>/dev/null || true
-        cp skia-build/skia/out/Release/*.so Skia/bin/Android/$arch_dir/ 2>/dev/null || true
+        cp skia-build/skia/out/Release/*.a Skia/lib/Android/$archDir/ 2>/dev/null || true
+        cp skia-build/skia/out/Release/*.so Skia/bin/Android/$archDir/ 2>/dev/null || true
         
         # 复制Dawn头文件
         cp -r skia-build/dawn/include/* Skia/include/dawn/
@@ -841,10 +841,10 @@ EOF
         fi
         
         # 复制Dawn库文件
-        find skia-build/dawn/build -name "*.a" -exec cp {} Skia/lib/Android/$arch_dir/ \; 2>/dev/null || true
-        find skia-build/dawn/build -name "*.so" -exec cp {} Skia/bin/Android/$arch_dir/ \; 2>/dev/null || true
+        find skia-build/dawn/build -name "*.a" -exec cp {} Skia/lib/Android/$archDir/ \; 2>/dev/null || true
+        find skia-build/dawn/build -name "*.so" -exec cp {} Skia/bin/Android/$archDir/ \; 2>/dev/null || true
 
-    - name: 创建CMakeLists.txt (Android)
+    - name: 创建CMakeLists.txt
       run: |
         cat > Skia/CMakeLists.txt << 'EOF'
 cmake_minimum_required(VERSION 3.20)
@@ -981,19 +981,19 @@ EOF
         mkdir -p Skia-Release/lib
         
         # 合并所有头文件（只需要一份）
-        first_artifact=$(find artifacts -name "skia-dawn-*" -type d | head -n 1)
-        if [ -n "$first_artifact" ]; then
-          cp -r "$first_artifact"/include/* Skia-Release/include/
-          cp "$first_artifact"/CMakeLists.txt Skia-Release/
+        firstArtifact=$(find artifacts -name "skia-dawn-*" -type d | head -n 1)
+        if [ -n "$firstArtifact" ]; then
+          cp -r "$firstArtifact"/include/* Skia-Release/include/
+          cp "$firstArtifact"/CMakeLists.txt Skia-Release/
         fi
         
         # 合并所有平台的二进制文件和库文件
-        for artifact_dir in artifacts/skia-dawn-*; do
-          if [ -d "$artifact_dir/bin" ]; then
-            cp -r "$artifact_dir"/bin/* Skia-Release/bin/
+        for artifactDir in artifacts/skia-dawn-*; do
+          if [ -d "$artifactDir/bin" ]; then
+            cp -r "$artifactDir"/bin/* Skia-Release/bin/
           fi
-          if [ -d "$artifact_dir/lib" ]; then
-            cp -r "$artifact_dir"/lib/* Skia-Release/lib/
+          if [ -d "$artifactDir/lib" ]; then
+            cp -r "$artifactDir"/lib/* Skia-Release/lib/
           fi
         done
 
@@ -1005,14 +1005,14 @@ EOF
         zip -r Skia.zip Skia-Release/
 
     - name: 创建Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         tag_name: v${{ github.run_number }}
         name: Skia + Dawn 预编译库 v${{ github.run_number }}
         body: |
           ## Skia + Dawn 预编译库
           
-          这个release包含了为多个平台和编译器编译的Skia和Dawn库：
+          这个Release包含了为多个平台和编译器编译的Skia和Dawn库：
           
           ### 支持的平台和编译器：
           - **Windows x64**: MSVC 2022, Clang 18
@@ -1049,8 +1049,6 @@ EOF
           │   └── Android/     # Android库文件
           └── CMakeLists.txt   # CMake配置文件
           ```
-          
-          构建于: ${{ github.sha }}
         files: |
           Skia.zip
           Skia.tar.gz
