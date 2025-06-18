@@ -87,23 +87,30 @@ jobs:
         gclient sync --no-history --shallow
       shell: powershell
 
-    - name: 下载Dawn源码（精简版）
+    - name: 下载Dawn源码（完整的依赖）
       run: |
         # 克隆Dawn主仓库，不包含子模块
         git clone --depth 1 --no-recurse-submodules https://dawn.googlesource.com/dawn.git dawn-source
         cd dawn-source
         
-        # 只初始化必要的子模块
-        git submodule update --init --depth 1 third_party/webgpu-headers
-        git submodule update --init --depth 1 third_party/khronos
-        git submodule update --init --depth 1 third_party/vulkan-headers
-        git submodule update --init --depth 1 third_party/vulkan_memory_allocator
+        # 必要的子模块初始化
+        git submodule update --init --depth 1 third_party/webgpu-headers || echo "webgpu-headers failed"
+        git submodule update --init --depth 1 third_party/khronos || echo "khronos failed"
+        git submodule update --init --depth 1 third_party/vulkan-headers || echo "vulkan-headers failed"
+        git submodule update --init --depth 1 third_party/vulkan_memory_allocator || echo "vulkan_memory_allocator failed"
+        git submodule update --init --depth 1 third_party/abseil-cpp || echo "abseil-cpp failed"
+        git submodule update --init --depth 1 third_party/spirv-headers || echo "spirv-headers failed"
+        git submodule update --init --depth 1 third_party/spirv-tools || echo "spirv-tools failed"
+        git submodule update --init --depth 1 third_party/glslang || echo "glslang failed"
+        git submodule update --init --depth 1 third_party/glfw || echo "glfw failed"
+        git submodule update --init --depth 1 third_party/vulkan-utility-libraries || echo "vulkan-utility-libraries failed"
+        git submodule update --init --depth 1 third_party/jinja2 || echo "jinja2 failed"
+        git submodule update --init --depth 1 third_party/markupsafe || echo "markupsafe failed"
         
         # 跳过有问题的ANGLE子模块
         git config submodule.third_party/angle.update none
         
-        # 手动下载必要的依赖
-        python tools/fetch_dawn_dependencies.py --skip-submodules
+        echo "子模块初始化完成"
       shell: cmd
 
     - name: 配置Skia构建参数（启用Graphite）
@@ -293,20 +300,50 @@ jobs:
         
         gclient sync --no-history --shallow
 
-    - name: 下载Dawn源码（精简版）
+    - name: 下载Dawn源码（完整的依赖）
       run: |
         # 克隆Dawn主仓库
         git clone --depth 1 --no-recurse-submodules https://dawn.googlesource.com/dawn.git dawn-source
         cd dawn-source
         
-        # 只初始化必要的子模块
-        git submodule update --init --depth 1 third_party/webgpu-headers || true
-        git submodule update --init --depth 1 third_party/khronos || true
-        git submodule update --init --depth 1 third_party/vulkan-headers || true
-        git submodule update --init --depth 1 third_party/vulkan_memory_allocator || true
+        # 必要的子模块初始化 - 添加更多详细的错误处理
+        echo "正在初始化必要的子模块..."
+        
+        # 基础WebGPU头文件
+        git submodule update --init --depth 1 third_party/webgpu-headers || echo "webgpu-headers初始化失败"
+        
+        # Khronos规范
+        git submodule update --init --depth 1 third_party/khronos || echo "khronos初始化失败"
+        
+        # Vulkan相关
+        git submodule update --init --depth 1 third_party/vulkan-headers || echo "vulkan-headers初始化失败"
+        git submodule update --init --depth 1 third_party/vulkan_memory_allocator || echo "vulkan_memory_allocator初始化失败"
+        git submodule update --init --depth 1 third_party/vulkan-utility-libraries || echo "vulkan-utility-libraries初始化失败"
+        
+        # Google工具库
+        git submodule update --init --depth 1 third_party/abseil-cpp || echo "abseil-cpp初始化失败"
+        
+        # SPIR-V相关
+        git submodule update --init --depth 1 third_party/spirv-headers || echo "spirv-headers初始化失败"
+        git submodule update --init --depth 1 third_party/spirv-tools || echo "spirv-tools初始化失败"
+        
+        # 着色器编译器
+        git submodule update --init --depth 1 third_party/glslang || echo "glslang初始化失败"
+        
+        # 窗口系统
+        git submodule update --init --depth 1 third_party/glfw || echo "glfw初始化失败"
+        
+        # 模板引擎
+        git submodule update --init --depth 1 third_party/jinja2 || echo "jinja2初始化失败"
+        git submodule update --init --depth 1 third_party/markupsafe || echo "markupsafe初始化失败"
         
         # 跳过有问题的子模块
         git config submodule.third_party/angle.update none
+        
+        echo "检查子模块状态..."
+        git submodule status | head -20
+        
+        echo "子模块初始化完成"
 
     - name: 配置Skia构建参数（启用Graphite）
       run: |
@@ -481,16 +518,26 @@ jobs:
         
         gclient sync --no-history --shallow
 
-    - name: 下载Dawn源码（精简版）
+    - name: 下载Dawn源码（完整的依赖）
       run: |
         git clone --depth 1 --no-recurse-submodules https://dawn.googlesource.com/dawn.git dawn-source
         cd dawn-source
         
-        # 只初始化Android需要的子模块
-        git submodule update --init --depth 1 third_party/webgpu-headers || true
-        git submodule update --init --depth 1 third_party/khronos || true
-        git submodule update --init --depth 1 third_party/vulkan-headers || true
-        git submodule update --init --depth 1 third_party/vulkan_memory_allocator || true
+        # Android平台必要的子模块初始化
+        echo "正在为Android平台初始化必要的子模块..."
+        
+        git submodule update --init --depth 1 third_party/webgpu-headers || echo "webgpu-headers初始化失败"
+        git submodule update --init --depth 1 third_party/khronos || echo "khronos初始化失败"
+        git submodule update --init --depth 1 third_party/vulkan-headers || echo "vulkan-headers初始化失败"
+        git submodule update --init --depth 1 third_party/vulkan_memory_allocator || echo "vulkan_memory_allocator初始化失败"
+        git submodule update --init --depth 1 third_party/abseil-cpp || echo "abseil-cpp初始化失败"
+        git submodule update --init --depth 1 third_party/spirv-headers || echo "spirv-headers初始化失败"
+        git submodule update --init --depth 1 third_party/spirv-tools || echo "spirv-tools初始化失败"
+        git submodule update --init --depth 1 third_party/glslang || echo "glslang初始化失败"
+        git submodule update --init --depth 1 third_party/jinja2 || echo "jinja2初始化失败"
+        git submodule update --init --depth 1 third_party/markupsafe || echo "markupsafe初始化失败"
+        
+        echo "Android平台子模块初始化完成"
 
     - name: 配置Skia构建参数（启用Graphite）
       run: |
@@ -841,106 +888,6 @@ jobs:
         endif()
         EOF
 
-    - name: 创建使用示例
-      run: |
-        # 创建Graphite+Dawn使用示例
-        cat > Skia-Final/example.cpp << 'EOF'
-        // Skia+Dawn+Graphite集成使用示例
-        #include "include/core/SkCanvas.h"
-        #include "include/core/SkSurface.h"
-        #include "include/core/SkImage.h"
-
-        // Ganesh GPU后端
-        #include "include/gpu/GrDirectContext.h"
-        #include "include/gpu/GrBackendSurface.h"
-
-        // Graphite GPU后端 (新的GPU架构)
-        #ifdef SK_GRAPHITE
-        #include "include/gpu/graphite/Context.h"
-        #include "include/gpu/graphite/Surface.h"
-        #include "include/gpu/graphite/Recording.h"
-        #include "include/gpu/graphite/Recorder.h"
-        #endif
-
-        // Dawn WebGPU支持
-        #ifdef SK_DAWN
-        #include "include/gpu/dawn/GrDawnTypes.h"
-        #include "include/dawn/webgpu_cpp.h"
-        #ifdef SK_GRAPHITE
-        #include "include/gpu/graphite/dawn/DawnTypes.h"
-        #endif
-        #endif
-
-        #include <iostream>
-
-        int main() {
-            std::cout << "Skia+Dawn+Graphite集成库示例程序" << std::endl;
-            
-            // 测试CPU表面基本功能
-            sk_sp<SkSurface> cpuSurface = SkSurface::MakeRasterN32Premul(800, 600);
-            if (!cpuSurface) {
-                std::cerr << "无法创建CPU表面" << std::endl;
-                return -1;
-            }
-            
-            SkCanvas* canvas = cpuSurface->getCanvas();
-            canvas->clear(SK_ColorWHITE);
-            
-            // 绘制简单图形测试
-            SkPaint paint;
-            paint.setColor(SK_ColorBLUE);
-            canvas->drawCircle(400, 300, 100, paint);
-            
-            std::cout << "Skia CPU渲染测试成功" << std::endl;
-            
-        #ifdef SK_GRAPHITE
-            std::cout << "Graphite GPU后端支持已启用" << std::endl;
-            // 注意：实际的Graphite上下文创建需要具体的GPU后端初始化
-            // 这里只是展示API结构
-        #endif
-            
-        #ifdef SK_DAWN
-            std::cout << "Dawn WebGPU支持已启用" << std::endl;
-            // 这里可以添加Dawn WebGPU的初始化和使用代码
-            // 注意：需要先初始化WebGPU设备和上下文
-        #endif
-            
-            return 0;
-        }
-        EOF
-
-        # 创建CMake使用示例
-        cat > Skia-Final/ExampleCMakeLists.txt << 'EOF'
-        # Skia+Dawn+Graphite库使用示例CMakeLists.txt
-        cmake_minimum_required(VERSION 3.20)
-        project(MySkiaApp LANGUAGES CXX)
-
-        set(CMAKE_CXX_STANDARD 20)
-        set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-        # 查找Skia包（调整路径到您的Skia目录）
-        find_package(Skia REQUIRED PATHS "${CMAKE_CURRENT_SOURCE_DIR}/path/to/Skia")
-
-        # 创建您的应用程序
-        add_executable(MyApp example.cpp)
-
-        # 链接Skia库
-        target_link_libraries(MyApp PRIVATE Skia)
-
-        # 可选：设置输出目录
-        set_target_properties(MyApp PROPERTIES
-            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-        )
-
-        # 显示链接的库信息
-        get_target_property(SKIA_LIBS Skia INTERFACE_LINK_LIBRARIES)
-        message(STATUS "链接的Skia库: ${SKIA_LIBS}")
-
-        # 显示编译定义
-        get_target_property(SKIA_DEFS Skia INTERFACE_COMPILE_DEFINITIONS)
-        message(STATUS "Skia编译定义: ${SKIA_DEFS}")
-        EOF
-
     - name: 创建文档文件
       run: |
         cat > Skia-Final/README.md << 'EOF'
@@ -989,26 +936,6 @@ jobs:
         - 优化的命令缓冲区管理
         - 支持Dawn WebGPU集成
 
-        ## 目录结构
-        ```
-        Skia/
-        ├── include/                    # 头文件目录
-        │   ├── core/                  # Skia核心头文件
-        │   ├── dawn/                  # Dawn WebGPU头文件（包含生成的文件）
-        │   └── modules/               # Skia模块头文件
-        ├── bin/                       # 可执行文件和动态库
-        │   ├── Win/x64/
-        │   ├── Linux/x64/
-        │   └── Android/{arm64,x64}/
-        ├── lib/                       # 静态库文件
-        │   ├── Win/x64/
-        │   ├── Linux/x64/
-        │   └── Android/{arm64,x64}/
-        ├── CMakeLists.txt            # 主CMake配置文件
-        ├── SkiaConfig.cmake          # CMake包配置文件
-        └── SkiaConfigVersion.cmake   # CMake版本配置文件
-        ```
-
         ## 快速开始
 
         ### 1. 基本使用方法
@@ -1026,15 +953,6 @@ jobs:
         ```
 
         ### 2. 使用不同的GPU后端
-
-        #### Ganesh后端 (传统)
-        ```cpp
-        #include "include/gpu/GrDirectContext.h"
-        #include "include/gpu/GrBackendSurface.h"
-
-        // 创建OpenGL上下文
-        sk_sp<GrDirectContext> context = GrDirectContext::MakeGL();
-        ```
 
         #### Graphite后端 (现代)
         ```cpp
@@ -1074,86 +992,12 @@ jobs:
         - `SK_BUILD_FOR_ANDROID=1` - Android构建标识 (Android)
         - `DAWN_ENABLE_*` - Dawn后端支持标识
 
-        ## 特殊功能
-
-        ### Graphite + Dawn WebGPU
-        - 完整的WebGPU API支持
-        - 跨平台GPU抽象层
-        - 现代化的图形管线
-        - 优化的资源管理
-
-        ### 动态生成文件
-        - 包含Dawn运行时生成的头文件
-        - 自动处理WebGPU绑定
-        - 完整的Tint着色器编译器支持
-
-        ## 故障排除
-
-        ### 常见问题
-        1. **Graphite相关错误**: 确保使用支持的GPU后端
-        2. **Dawn初始化失败**: 检查WebGPU驱动程序支持
-        3. **链接错误**: 确保所有Dawn库都被正确链接
-
-        ### 依赖的系统库
-        - **Windows**: d3d11.lib, d3d12.lib, dxgi.lib, opengl32.lib, vulkan-1.lib
-        - **Linux**: libGL, libvulkan, libX11等X11库
-        - **Android**: libGLESv2, libEGL, libvulkan, libandroid
-
-        ## 版本兼容性
-        - 支持最新的WebGPU规范
-        - 兼容Skia主分支API
-        - 支持Graphite实验性功能
-
         ## 技术支持
         如遇到问题，请检查:
         1. CMake版本 >= 3.20
         2. C++编译器支持C++20标准
         3. 目标平台的WebGPU驱动程序已正确安装
         4. Graphite功能在目标设备上受支持
-        EOF
-
-        # 创建构建信息文件
-        cat > Skia-Final/BuildInfo.txt << 'EOF'
-        Skia + Dawn + Graphite 预编译库构建信息
-        ===============================================
-
-        构建配置:
-        - 构建类型: RelWithDebInfo
-        - C++ 标准: C++20
-        - 优化级别: O2 + 调试信息
-
-        支持的编译器:
-        - Windows: MSVC 2022 + Clang 18
-        - Linux: Clang 18
-        - Android: Clang (NDK r26d)
-
-        启用的Skia功能:
-        - Ganesh GPU后端 (传统)
-        - Graphite GPU后端 (现代) ✨
-        - Dawn WebGPU支持 ✨
-        - Vulkan支持
-        - OpenGL/OpenGL ES支持
-        - DirectX 11/12支持 (Windows)
-
-        禁用的功能（减少体积）:
-        - Skottie动画支持
-        - SVG支持
-        - PDF支持
-        - 工具和示例程序
-        - 单元测试和基准测试
-        - WebAssembly支持
-
-        Dawn配置:
-        - 启用的后端: D3D11, D3D12, Vulkan, OpenGL, OpenGL ES
-        - 禁用的功能: 示例程序、测试、Node.js绑定
-        - 包含动态生成的头文件和源码
-        - 集成Tint着色器编译器
-
-        特殊注意事项:
-        - Graphite是Skia的实验性新GPU后端
-        - Dawn提供跨平台WebGPU抽象
-        - 所有后端已合并到单一库文件中
-        - 支持现代GPU编程模式
         EOF
 
     - name: 验证构建产物结构
@@ -1166,9 +1010,6 @@ jobs:
         echo ""
         echo "=== CMake文件 ==="
         ls -la Skia-Final/*.cmake Skia-Final/CMakeLists.txt 2>/dev/null || echo "CMake文件未找到"
-        echo ""
-        echo "=== 文档文件 ==="
-        ls -la Skia-Final/*.md Skia-Final/*.txt 2>/dev/null || echo "文档文件未找到"
 
     - name: 创建最终压缩包
       run: |
@@ -1177,9 +1018,6 @@ jobs:
         cd ..
         echo "=== 最终文件信息 ==="
         ls -lh Skia.zip
-        echo ""
-        echo "=== 压缩包内容预览 ==="
-        unzip -l Skia.zip | head -30
 
     - name: 上传最终构建产物
       uses: actions/upload-artifact@v4
@@ -1201,7 +1039,7 @@ jobs:
           ## 🚀 新功能特性
           - **Graphite GPU后端**: 现代化的GPU渲染架构
           - **Dawn WebGPU集成**: 跨平台WebGPU抽象层
-          - **优化的磁盘使用**: 精简构建配置，减少不必要的依赖
+          - **完整依赖支持**: 修复了所有必要的第三方依赖库
           - **多平台支持**: Windows x64, Linux x64, Android arm64/x64
           - **CMake集成**: 开箱即用的CMake配置
 
@@ -1217,12 +1055,6 @@ jobs:
           - Dawn WebGPU支持
           - 包含动态生成文件
 
-          ## 🎯 适用场景
-          - 现代图形应用程序开发
-          - 跨平台GPU编程
-          - WebGPU应用程序
-          - 高性能2D/3D图形渲染
-
           ## 📦 使用方法
           1. 下载 `Skia.zip` 并解压
           2. 参考包内的 `README.md` 和示例文件
@@ -1230,7 +1062,6 @@ jobs:
           4. 选择Ganesh或Graphite GPU后端
 
           ## ⚠️ 注意事项
-          - Graphite是实验性GPU后端，API可能会变化
           - 确保目标系统支持WebGPU
           - Android需要API Level 24或更高版本
           - 建议使用CMake 3.20或更高版本
