@@ -53,11 +53,17 @@ jobs:
         echo "GIT_CACHE_PATH=${{ github.workspace }}\git-cache" >> $GITHUB_ENV
       shell: bash
 
-    - name: 创建工作目录
+    - name: 清理并创建工作目录
       run: |
-        mkdir -p git-cache
-        mkdir -p skia-build
-      shell: bash
+        # 清理可能存在的目录
+        if (Test-Path "git-cache") { Remove-Item -Recurse -Force "git-cache" }
+        if (Test-Path "skia-build") { Remove-Item -Recurse -Force "skia-build" }
+        if (Test-Path "depot_tools") { Remove-Item -Recurse -Force "depot_tools" }
+        
+        # 创建新的工作目录
+        New-Item -ItemType Directory -Path "git-cache" -Force
+        New-Item -ItemType Directory -Path "skia-build" -Force
+      shell: powershell
 
     - name: 获取 depot_tools
       run: |
@@ -91,18 +97,36 @@ jobs:
         git clone --depth 1 --branch ${{ env.SKIA_VERSION }} https://skia.googlesource.com/skia.git
         cd skia
         
-        # 手动下载主要依赖项而不使用 gclient
+        # 清理并创建第三方库目录
+        if [ -d "third_party" ]; then
+          rm -rf third_party
+        fi
         mkdir -p third_party
         cd third_party
         
         # 下载主要的第三方库
+        echo "正在下载 googletest..."
         git clone --depth 1 https://chromium.googlesource.com/external/github.com/google/googletest.git googletest
+        
+        echo "正在下载 harfbuzz..."
         git clone --depth 1 https://skia.googlesource.com/external/github.com/harfbuzz/harfbuzz.git harfbuzz
+        
+        echo "正在下载 icu..."
         git clone --depth 1 https://chromium.googlesource.com/chromium/src/third_party/icu.git icu
+        
+        echo "正在下载 libjpeg-turbo..."
         git clone --depth 1 https://skia.googlesource.com/external/github.com/libjpeg-turbo/libjpeg-turbo.git libjpeg-turbo
+        
+        echo "正在下载 libpng..."
         git clone --depth 1 https://skia.googlesource.com/external/github.com/glennrp/libpng.git libpng
+        
+        echo "正在下载 libwebp..."
         git clone --depth 1 https://skia.googlesource.com/external/github.com/webmproject/libwebp.git libwebp
+        
+        echo "正在下载 zlib..."
         git clone --depth 1 https://skia.googlesource.com/external/github.com/madler/zlib.git zlib
+        
+        echo "正在下载 cpu_features..."
         git clone --depth 1 https://skia.googlesource.com/external/github.com/google/cpu_features.git cpu_features
         
         cd ..
@@ -111,13 +135,23 @@ jobs:
     - name: 下载和配置 Dawn
       run: |
         cd skia-build
+        
+        # 清理可能存在的 dawn 目录
+        if [ -d "dawn" ]; then
+          rm -rf dawn
+        fi
+        
         git clone --depth 1 --branch ${{ env.DAWN_VERSION }} https://dawn.googlesource.com/dawn.git
         cd dawn
         
-        # 手动下载 Dawn 的依赖项
+        # 清理并创建第三方库目录
+        if [ -d "third_party" ]; then
+          rm -rf third_party
+        fi
         mkdir -p third_party
         cd third_party
         
+        echo "正在下载 Dawn 依赖项..."
         git clone --depth 1 https://chromium.googlesource.com/external/github.com/google/googletest.git googletest
         git clone --depth 1 https://chromium.googlesource.com/external/khronos/SPIRV-Headers.git spirv-headers
         git clone --depth 1 https://chromium.googlesource.com/external/github.com/KhronosGroup/SPIRV-Tools.git spirv-tools
@@ -129,6 +163,11 @@ jobs:
     - name: 编译 Dawn (Windows)
       run: |
         cd skia-build/dawn
+        
+        # 清理并创建构建目录
+        if [ -d "out" ]; then
+          rm -rf out
+        fi
         mkdir -p out/RelWithDebInfo
         
         # 创建 Dawn 构建配置
@@ -169,6 +208,11 @@ jobs:
     - name: 编译 Skia (Windows)  
       run: |
         cd skia-build/skia
+        
+        # 清理并创建构建目录
+        if [ -d "out" ]; then
+          rm -rf out
+        fi
         mkdir -p out/RelWithDebInfo
         
         # 创建 Skia 构建配置
@@ -221,14 +265,17 @@ jobs:
 
     - name: 收集 Windows 构建产物
       run: |
+        # 创建产物目录结构
         mkdir -p artifacts/Windows/x64/include
         mkdir -p artifacts/Windows/x64/lib
         mkdir -p artifacts/Windows/x64/bin
         
         # 复制 Skia 头文件
+        echo "正在复制 Skia 头文件..."
         cp -r skia-build/skia/include/* artifacts/Windows/x64/include/
         
         # 复制 Dawn 头文件和生成的文件
+        echo "正在复制 Dawn 头文件..."
         if [ -d "skia-build/dawn/out/RelWithDebInfo/gen/include" ]; then
           cp -r skia-build/dawn/out/RelWithDebInfo/gen/include/* artifacts/Windows/x64/include/
         fi
@@ -239,19 +286,23 @@ jobs:
         fi
         
         # 收集所有静态库文件
+        echo "正在收集库文件..."
         find skia-build/skia/out/RelWithDebInfo -name "*.lib" -exec cp {} artifacts/Windows/x64/lib/ \; 2>/dev/null || true
         find skia-build/dawn/out/RelWithDebInfo -name "*.lib" -exec cp {} artifacts/Windows/x64/lib/ \; 2>/dev/null || true
         
         # 收集 DLL 和可执行文件
+        echo "正在收集二进制文件..."
         find skia-build/skia/out/RelWithDebInfo -name "*.dll" -exec cp {} artifacts/Windows/x64/bin/ \; 2>/dev/null || true
         find skia-build/dawn/out/RelWithDebInfo -name "*.dll" -exec cp {} artifacts/Windows/x64/bin/ \; 2>/dev/null || true
         find skia-build/skia/out/RelWithDebInfo -name "*.exe" -exec cp {} artifacts/Windows/x64/bin/ \; 2>/dev/null || true
         
         # 显示收集到的文件
         echo "收集到的库文件:"
-        ls -la artifacts/Windows/x64/lib/ || true
+        ls -la artifacts/Windows/x64/lib/ 2>/dev/null || echo "没有找到库文件"
         echo "收集到的二进制文件:"
-        ls -la artifacts/Windows/x64/bin/ || true
+        ls -la artifacts/Windows/x64/bin/ 2>/dev/null || echo "没有找到二进制文件"
+        echo "收集到的头文件目录:"
+        ls -la artifacts/Windows/x64/include/ 2>/dev/null || echo "没有找到头文件"
       shell: bash
 
     - name: 上传 Windows 构建产物
@@ -300,6 +351,12 @@ jobs:
         sudo update-alternatives --install /usr/bin/cc cc /usr/bin/clang-18 100
         sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-18 100
 
+    - name: 清理并创建工作目录
+      run: |
+        # 清理可能存在的目录
+        rm -rf depot_tools skia-build
+        mkdir -p skia-build
+
     - name: 获取 depot_tools
       run: |
         git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
@@ -307,13 +364,20 @@ jobs:
 
     - name: 下载和配置 Skia
       run: |
-        mkdir skia-build && cd skia-build
+        cd skia-build
+        
+        # 清理可能存在的目录
+        rm -rf skia
+        
         git clone --depth 1 --branch ${{ env.SKIA_VERSION }} https://skia.googlesource.com/skia.git
         cd skia
         
-        # 手动下载主要依赖项
+        # 清理并创建第三方库目录
+        rm -rf third_party
         mkdir -p third_party
         cd third_party
+        
+        echo "正在下载第三方依赖项..."
         git clone --depth 1 https://chromium.googlesource.com/external/github.com/google/googletest.git googletest
         git clone --depth 1 https://skia.googlesource.com/external/github.com/harfbuzz/harfbuzz.git harfbuzz
         git clone --depth 1 https://chromium.googlesource.com/chromium/src/third_party/icu.git icu
@@ -327,12 +391,19 @@ jobs:
     - name: 下载和配置 Dawn
       run: |
         cd skia-build
+        
+        # 清理可能存在的目录
+        rm -rf dawn
+        
         git clone --depth 1 --branch ${{ env.DAWN_VERSION }} https://dawn.googlesource.com/dawn.git
         cd dawn
         
-        # 手动下载 Dawn 的依赖项
+        # 清理并创建第三方库目录
+        rm -rf third_party
         mkdir -p third_party
         cd third_party
+        
+        echo "正在下载 Dawn 依赖项..."
         git clone --depth 1 https://chromium.googlesource.com/external/github.com/google/googletest.git googletest
         git clone --depth 1 https://chromium.googlesource.com/external/khronos/SPIRV-Headers.git spirv-headers
         git clone --depth 1 https://chromium.googlesource.com/external/github.com/KhronosGroup/SPIRV-Tools.git spirv-tools
@@ -342,6 +413,9 @@ jobs:
     - name: 编译 Dawn (Linux)
       run: |
         cd skia-build/dawn
+        
+        # 清理并创建构建目录
+        rm -rf out
         mkdir -p out/RelWithDebInfo
         
         # 创建 Dawn 构建配置
@@ -380,6 +454,9 @@ jobs:
     - name: 编译 Skia (Linux)
       run: |
         cd skia-build/skia
+        
+        # 清理并创建构建目录
+        rm -rf out
         mkdir -p out/RelWithDebInfo
         
         # 创建 Skia 构建配置
@@ -428,14 +505,17 @@ jobs:
 
     - name: 收集 Linux 构建产物
       run: |
+        # 创建产物目录结构
         mkdir -p artifacts/Linux/x64/include
         mkdir -p artifacts/Linux/x64/lib
         mkdir -p artifacts/Linux/x64/bin
         
         # 复制 Skia 头文件
+        echo "正在复制 Skia 头文件..."
         cp -r skia-build/skia/include/* artifacts/Linux/x64/include/
         
         # 复制 Dawn 头文件和生成的文件
+        echo "正在复制 Dawn 头文件..."
         if [ -d "skia-build/dawn/out/RelWithDebInfo/gen/include" ]; then
           cp -r skia-build/dawn/out/RelWithDebInfo/gen/include/* artifacts/Linux/x64/include/
         fi
@@ -446,12 +526,17 @@ jobs:
         fi
         
         # 收集静态库文件
+        echo "正在收集库文件..."
         find skia-build/skia/out/RelWithDebInfo -name "*.a" -exec cp {} artifacts/Linux/x64/lib/ \; 2>/dev/null || true
         find skia-build/dawn/out/RelWithDebInfo -name "*.a" -exec cp {} artifacts/Linux/x64/lib/ \; 2>/dev/null || true
         
         # 收集动态库文件
         find skia-build/skia/out/RelWithDebInfo -name "*.so" -exec cp {} artifacts/Linux/x64/lib/ \; 2>/dev/null || true
         find skia-build/dawn/out/RelWithDebInfo -name "*.so" -exec cp {} artifacts/Linux/x64/lib/ \; 2>/dev/null || true
+        
+        # 显示收集到的文件
+        echo "收集到的库文件:"
+        ls -la artifacts/Linux/x64/lib/ 2>/dev/null || echo "没有找到库文件"
 
     - name: 上传 Linux 构建产物
       uses: actions/upload-artifact@v4
@@ -487,6 +572,12 @@ jobs:
       with:
         ndk-version: r26d
 
+    - name: 清理并创建工作目录
+      run: |
+        # 清理可能存在的目录
+        rm -rf depot_tools skia-build
+        mkdir -p skia-build
+
     - name: 获取 depot_tools
       run: |
         git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
@@ -494,13 +585,20 @@ jobs:
 
     - name: 下载和配置 Skia
       run: |
-        mkdir skia-build && cd skia-build
+        cd skia-build
+        
+        # 清理可能存在的目录
+        rm -rf skia
+        
         git clone --depth 1 --branch ${{ env.SKIA_VERSION }} https://skia.googlesource.com/skia.git
         cd skia
         
-        # 手动下载主要依赖项
+        # 清理并创建第三方库目录
+        rm -rf third_party
         mkdir -p third_party
         cd third_party
+        
+        echo "正在下载第三方依赖项..."
         git clone --depth 1 https://chromium.googlesource.com/external/github.com/google/googletest.git googletest
         git clone --depth 1 https://skia.googlesource.com/external/github.com/harfbuzz/harfbuzz.git harfbuzz
         git clone --depth 1 https://chromium.googlesource.com/chromium/src/third_party/icu.git icu
@@ -514,12 +612,19 @@ jobs:
     - name: 下载和配置 Dawn
       run: |
         cd skia-build
+        
+        # 清理可能存在的目录
+        rm -rf dawn
+        
         git clone --depth 1 --branch ${{ env.DAWN_VERSION }} https://dawn.googlesource.com/dawn.git
         cd dawn
         
-        # 手动下载 Dawn 的依赖项
+        # 清理并创建第三方库目录
+        rm -rf third_party
         mkdir -p third_party
         cd third_party
+        
+        echo "正在下载 Dawn 依赖项..."
         git clone --depth 1 https://chromium.googlesource.com/external/github.com/google/googletest.git googletest
         git clone --depth 1 https://chromium.googlesource.com/external/khronos/SPIRV-Headers.git spirv-headers
         git clone --depth 1 https://chromium.googlesource.com/external/github.com/KhronosGroup/SPIRV-Tools.git spirv-tools
@@ -529,6 +634,9 @@ jobs:
     - name: 编译 Dawn (Android)
       run: |
         cd skia-build/dawn
+        
+        # 清理并创建构建目录
+        rm -rf out
         mkdir -p out/RelWithDebInfo
         
         # 创建 Dawn 构建配置
@@ -562,6 +670,9 @@ jobs:
     - name: 编译 Skia (Android)
       run: |
         cd skia-build/skia
+        
+        # 清理并创建构建目录
+        rm -rf out
         mkdir -p out/RelWithDebInfo
         
         # 创建 Skia 构建配置
@@ -609,14 +720,17 @@ jobs:
 
     - name: 收集 Android 构建产物
       run: |
+        # 创建产物目录结构
         mkdir -p artifacts/Android/${{ matrix.arch }}/include
         mkdir -p artifacts/Android/${{ matrix.arch }}/lib
         mkdir -p artifacts/Android/${{ matrix.arch }}/bin
         
         # 复制 Skia 头文件
+        echo "正在复制 Skia 头文件..."
         cp -r skia-build/skia/include/* artifacts/Android/${{ matrix.arch }}/include/
         
         # 复制 Dawn 头文件和生成的文件
+        echo "正在复制 Dawn 头文件..."
         if [ -d "skia-build/dawn/out/RelWithDebInfo/gen/include" ]; then
           cp -r skia-build/dawn/out/RelWithDebInfo/gen/include/* artifacts/Android/${{ matrix.arch }}/include/
         fi
@@ -627,12 +741,17 @@ jobs:
         fi
         
         # 收集静态库文件
+        echo "正在收集库文件..."
         find skia-build/skia/out/RelWithDebInfo -name "*.a" -exec cp {} artifacts/Android/${{ matrix.arch }}/lib/ \; 2>/dev/null || true
         find skia-build/dawn/out/RelWithDebInfo -name "*.a" -exec cp {} artifacts/Android/${{ matrix.arch }}/lib/ \; 2>/dev/null || true
         
         # 收集动态库文件
         find skia-build/skia/out/RelWithDebInfo -name "*.so" -exec cp {} artifacts/Android/${{ matrix.arch }}/lib/ \; 2>/dev/null || true
         find skia-build/dawn/out/RelWithDebInfo -name "*.so" -exec cp {} artifacts/Android/${{ matrix.arch }}/lib/ \; 2>/dev/null || true
+        
+        # 显示收集到的文件
+        echo "收集到的库文件:"
+        ls -la artifacts/Android/${{ matrix.arch }}/lib/ 2>/dev/null || echo "没有找到库文件"
 
     - name: 上传 Android 构建产物
       uses: actions/upload-artifact@v4
@@ -660,52 +779,64 @@ jobs:
         mkdir -p Skia/bin/{Win/x64,Linux/x64,Android/{arm64,x64}}
         mkdir -p Skia/lib/{Win/x64,Linux/x64,Android/{arm64,x64}}
         
+        echo "正在组织最终目录结构..."
+        
         # 复制头文件 (使用 Windows 版本作为主要头文件源，如果没有则使用 Linux)
         if [ -d "all-artifacts/skia-dawn-windows-x64/include" ]; then
+          echo "使用 Windows 头文件..."
           cp -r all-artifacts/skia-dawn-windows-x64/include/* Skia/include/include/ 2>/dev/null || true
         elif [ -d "all-artifacts/skia-dawn-linux-x64/include" ]; then
+          echo "使用 Linux 头文件..."
           cp -r all-artifacts/skia-dawn-linux-x64/include/* Skia/include/include/ 2>/dev/null || true
         fi
         
         # 分离 Dawn 头文件
         if [ -d "Skia/include/include/dawn" ]; then
+          echo "分离 Dawn 头文件..."
           cp -r Skia/include/include/dawn/* Skia/include/dawn/ 2>/dev/null || true
           rm -rf Skia/include/include/dawn 2>/dev/null || true
         fi
         
         if [ -d "Skia/include/include/webgpu" ]; then
+          echo "分离 WebGPU 头文件..."
           cp -r Skia/include/include/webgpu/* Skia/include/dawn/ 2>/dev/null || true
           rm -rf Skia/include/include/webgpu 2>/dev/null || true
         fi
         
         # 复制各平台的库文件和二进制文件
+        echo "正在复制平台文件..."
+        
         # Windows
         if [ -d "all-artifacts/skia-dawn-windows-x64" ]; then
+          echo "复制 Windows 文件..."
           cp -r all-artifacts/skia-dawn-windows-x64/lib/* Skia/lib/Win/x64/ 2>/dev/null || true
           cp -r all-artifacts/skia-dawn-windows-x64/bin/* Skia/bin/Win/x64/ 2>/dev/null || true
         fi
         
         # Linux
         if [ -d "all-artifacts/skia-dawn-linux-x64" ]; then
+          echo "复制 Linux 文件..."
           cp -r all-artifacts/skia-dawn-linux-x64/lib/* Skia/lib/Linux/x64/ 2>/dev/null || true
           cp -r all-artifacts/skia-dawn-linux-x64/bin/* Skia/bin/Linux/x64/ 2>/dev/null || true
         fi
         
         # Android ARM64
         if [ -d "all-artifacts/skia-dawn-android-arm64" ]; then
+          echo "复制 Android ARM64 文件..."
           cp -r all-artifacts/skia-dawn-android-arm64/lib/* Skia/lib/Android/arm64/ 2>/dev/null || true
           cp -r all-artifacts/skia-dawn-android-arm64/bin/* Skia/bin/Android/arm64/ 2>/dev/null || true
         fi
         
         # Android x64
         if [ -d "all-artifacts/skia-dawn-android-x64" ]; then
+          echo "复制 Android x64 文件..."
           cp -r all-artifacts/skia-dawn-android-x64/lib/* Skia/lib/Android/x64/ 2>/dev/null || true
           cp -r all-artifacts/skia-dawn-android-x64/bin/* Skia/bin/Android/x64/ 2>/dev/null || true
         fi
         
         # 显示最终结构
         echo "最终目录结构:"
-        find Skia -type f | head -20
+        find Skia -type f | head -30
 
     - name: 创建 CMakeLists.txt
       run: |
@@ -924,7 +1055,11 @@ jobs:
 
     - name: 创建 Skia.zip 压缩包
       run: |
+        echo "正在创建 Skia.zip 压缩包..."
         zip -r Skia.zip Skia/
+        
+        echo "压缩包创建完成，大小："
+        ls -lh Skia.zip
 
     - name: 上传最终构建产物
       uses: actions/upload-artifact@v4
@@ -974,6 +1109,12 @@ jobs:
           
           ### Dawn 动态生成文件:
           此版本包含了 Dawn 构建过程中动态生成的头文件和源码，确保预编译库可以正常使用。
+          
+          ### 主要修复:
+          - 修复了目录冲突问题
+          - 改进了依赖项下载流程
+          - 增强了错误处理和日志输出
+          - 优化了构建产物收集过程
         files: Skia.zip
         draft: false
         prerelease: false
