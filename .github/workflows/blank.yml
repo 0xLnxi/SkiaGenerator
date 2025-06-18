@@ -71,7 +71,7 @@ jobs:
         $env:DEPOT_TOOLS_WIN_TOOLCHAIN = "0"
         mkdir skia-build
         cd skia-build
-        # 使用精简配置下载Skia
+        # 使用精简配置下载Skia，排除emscripten相关依赖
         gclient config --name skia --unmanaged https://skia.googlesource.com/skia.git
         # 禁用不必要的依赖
         echo "solutions = [" > .gclient
@@ -80,8 +80,7 @@ jobs:
         echo "    'url': 'https://skia.googlesource.com/skia.git'," >> .gclient
         echo "    'managed': False," >> .gclient
         echo "    'custom_deps': {" >> .gclient
-        echo "      'skia/third_party/externals/angle2': None," >> .gclient
-        echo "      'skia/third_party/externals/dawn': None," >> .gclient
+        echo "      'skia/third_party/externals/emsdk': None," >> .gclient
         echo "    }," >> .gclient
         echo "  }," >> .gclient
         echo "]" >> .gclient
@@ -107,18 +106,19 @@ jobs:
         python tools/fetch_dawn_dependencies.py --skip-submodules
       shell: cmd
 
-    - name: 配置Skia构建参数
+    - name: 配置Skia构建参数（启用Graphite）
       run: |
         $env:PATH = "$env:GITHUB_WORKSPACE\depot_tools;$env:PATH"
         cd skia-build\skia
         python tools\git-sync-deps
         
-        # 创建优化的构建配置
+        # 创建优化的构建配置，启用Graphite以支持Dawn
         $buildArgs = @(
           "is_official_build=true",
           "is_debug=false",
           "extra_cflags=[\`"/O2\`", \`"/Zi\`"]",
           "target_cpu=\`"x64\`"",
+          "skia_enable_graphite=true",
           "skia_use_dawn=true",
           "skia_use_gl=true", 
           "skia_use_direct3d=true",
@@ -128,6 +128,7 @@ jobs:
           "skia_enable_svg=false",
           "skia_enable_pdf=false",
           "skia_enable_flutter_defines=false",
+          "skia_use_wasm=false",
           "cc=\`"clang\`"",
           "cxx=\`"clang++\`"",
           "win_vc=\`"2022\`""
@@ -276,7 +277,7 @@ jobs:
         mkdir skia-build
         cd skia-build
         
-        # 创建精简的gclient配置
+        # 创建精简的gclient配置，禁用emscripten
         cat > .gclient << 'EOF'
         solutions = [
           {
@@ -284,8 +285,7 @@ jobs:
             "url": "https://skia.googlesource.com/skia.git",
             "managed": False,
             "custom_deps": {
-              "skia/third_party/externals/angle2": None,
-              "skia/third_party/externals/dawn": None,
+              "skia/third_party/externals/emsdk": None,
             },
           },
         ]
@@ -308,7 +308,7 @@ jobs:
         # 跳过有问题的子模块
         git config submodule.third_party/angle.update none
 
-    - name: 配置Skia构建参数
+    - name: 配置Skia构建参数（启用Graphite）
       run: |
         export PATH=$GITHUB_WORKSPACE/depot_tools:$PATH
         cd skia-build/skia
@@ -319,6 +319,7 @@ jobs:
           is_debug=false
           extra_cflags=["-O2", "-g"]
           target_cpu="x64"
+          skia_enable_graphite=true
           skia_use_dawn=true
           skia_use_gl=true
           skia_use_vulkan=true
@@ -327,6 +328,7 @@ jobs:
           skia_enable_svg=false
           skia_enable_pdf=false
           skia_enable_flutter_defines=false
+          skia_use_wasm=false
           cc="clang-18"
           cxx="clang++-18"
         '
@@ -471,8 +473,7 @@ jobs:
             "url": "https://skia.googlesource.com/skia.git",
             "managed": False,
             "custom_deps": {
-              "skia/third_party/externals/angle2": None,
-              "skia/third_party/externals/dawn": None,
+              "skia/third_party/externals/emsdk": None,
             },
           },
         ]
@@ -491,7 +492,7 @@ jobs:
         git submodule update --init --depth 1 third_party/vulkan-headers || true
         git submodule update --init --depth 1 third_party/vulkan_memory_allocator || true
 
-    - name: 配置Skia构建参数
+    - name: 配置Skia构建参数（启用Graphite）
       run: |
         export PATH=$GITHUB_WORKSPACE/depot_tools:$PATH
         cd skia-build/skia
@@ -509,6 +510,7 @@ jobs:
           is_debug=false
           target_os=\"android\"
           target_cpu=\"${ANDROID_ARCH}\"
+          skia_enable_graphite=true
           skia_use_dawn=true
           skia_use_vulkan=true
           skia_use_gl=true
@@ -516,6 +518,7 @@ jobs:
           skia_enable_skottie=false
           skia_enable_svg=false
           skia_enable_pdf=false
+          skia_use_wasm=false
           ndk=\"${ANDROID_NDK_HOME}\"
           android_ndk_api_level=24
         "
@@ -747,9 +750,10 @@ jobs:
             )
         endif()
 
-        # 设置编译定义
+        # 设置编译定义 - 包含Graphite支持
         target_compile_definitions(Skia INTERFACE
             SK_GANESH=1
+            SK_GRAPHITE=1
             SK_GL=1
             SK_VULKAN=1
         )
@@ -778,6 +782,7 @@ jobs:
         message(STATUS "架构: ${ARCH_DIR}")
         message(STATUS "库目录: ${LIB_DIR}")
         message(STATUS "二进制目录: ${BIN_DIR}")
+        message(STATUS "启用Graphite和Dawn WebGPU支持")
         EOF
 
     - name: 创建CMake配置文件
@@ -816,8 +821,9 @@ jobs:
         set(Skia_Dawn_FOUND TRUE)
         set(Skia_Core_FOUND TRUE)
         set(Skia_Modules_FOUND TRUE)
+        set(Skia_Graphite_FOUND TRUE)
 
-        message(STATUS "Skia+Dawn库配置已加载")
+        message(STATUS "Skia+Dawn库配置已加载 (包含Graphite和WebGPU支持)")
         EOF
 
         # 创建版本文件
@@ -837,33 +843,47 @@ jobs:
 
     - name: 创建使用示例
       run: |
-        # 创建基本使用示例
+        # 创建Graphite+Dawn使用示例
         cat > Skia-Final/example.cpp << 'EOF'
-        // Skia+Dawn集成使用示例
+        // Skia+Dawn+Graphite集成使用示例
         #include "include/core/SkCanvas.h"
         #include "include/core/SkSurface.h"
         #include "include/core/SkImage.h"
+
+        // Ganesh GPU后端
         #include "include/gpu/GrDirectContext.h"
         #include "include/gpu/GrBackendSurface.h"
 
+        // Graphite GPU后端 (新的GPU架构)
+        #ifdef SK_GRAPHITE
+        #include "include/gpu/graphite/Context.h"
+        #include "include/gpu/graphite/Surface.h"
+        #include "include/gpu/graphite/Recording.h"
+        #include "include/gpu/graphite/Recorder.h"
+        #endif
+
+        // Dawn WebGPU支持
         #ifdef SK_DAWN
         #include "include/gpu/dawn/GrDawnTypes.h"
         #include "include/dawn/webgpu_cpp.h"
+        #ifdef SK_GRAPHITE
+        #include "include/gpu/graphite/dawn/DawnTypes.h"
+        #endif
         #endif
 
         #include <iostream>
 
         int main() {
-            std::cout << "Skia+Dawn集成库示例程序" << std::endl;
+            std::cout << "Skia+Dawn+Graphite集成库示例程序" << std::endl;
             
-            // 创建CPU表面进行基本测试
-            sk_sp<SkSurface> surface = SkSurface::MakeRasterN32Premul(800, 600);
-            if (!surface) {
-                std::cerr << "无法创建Skia表面" << std::endl;
+            // 测试CPU表面基本功能
+            sk_sp<SkSurface> cpuSurface = SkSurface::MakeRasterN32Premul(800, 600);
+            if (!cpuSurface) {
+                std::cerr << "无法创建CPU表面" << std::endl;
                 return -1;
             }
             
-            SkCanvas* canvas = surface->getCanvas();
+            SkCanvas* canvas = cpuSurface->getCanvas();
             canvas->clear(SK_ColorWHITE);
             
             // 绘制简单图形测试
@@ -871,11 +891,18 @@ jobs:
             paint.setColor(SK_ColorBLUE);
             canvas->drawCircle(400, 300, 100, paint);
             
-            std::cout << "Skia基本功能测试成功" << std::endl;
+            std::cout << "Skia CPU渲染测试成功" << std::endl;
+            
+        #ifdef SK_GRAPHITE
+            std::cout << "Graphite GPU后端支持已启用" << std::endl;
+            // 注意：实际的Graphite上下文创建需要具体的GPU后端初始化
+            // 这里只是展示API结构
+        #endif
             
         #ifdef SK_DAWN
             std::cout << "Dawn WebGPU支持已启用" << std::endl;
-            // 这里可以添加Dawn相关的初始化和使用代码
+            // 这里可以添加Dawn WebGPU的初始化和使用代码
+            // 注意：需要先初始化WebGPU设备和上下文
         #endif
             
             return 0;
@@ -884,7 +911,7 @@ jobs:
 
         # 创建CMake使用示例
         cat > Skia-Final/ExampleCMakeLists.txt << 'EOF'
-        # Skia+Dawn库使用示例CMakeLists.txt
+        # Skia+Dawn+Graphite库使用示例CMakeLists.txt
         cmake_minimum_required(VERSION 3.20)
         project(MySkiaApp LANGUAGES CXX)
 
@@ -908,19 +935,24 @@ jobs:
         # 显示链接的库信息
         get_target_property(SKIA_LIBS Skia INTERFACE_LINK_LIBRARIES)
         message(STATUS "链接的Skia库: ${SKIA_LIBS}")
+
+        # 显示编译定义
+        get_target_property(SKIA_DEFS Skia INTERFACE_COMPILE_DEFINITIONS)
+        message(STATUS "Skia编译定义: ${SKIA_DEFS}")
         EOF
 
     - name: 创建文档文件
       run: |
         cat > Skia-Final/README.md << 'EOF'
-        # Skia + Dawn 预编译库
+        # Skia + Dawn + Graphite 预编译库
 
-        这是一个包含Skia图形库和Dawn WebGPU的预编译库包，支持多平台和多图形后端。
+        这是一个包含Skia图形库、Dawn WebGPU和Graphite GPU后端的预编译库包，支持多平台和多图形后端。
 
         ## 构建信息
         - **构建类型**: RelWithDebInfo
         - **C++ 标准**: C++20
         - **编译器**: Clang 18, GCC 13, MSVC 2022
+        - **特殊功能**: 启用Graphite和Dawn WebGPU支持
 
         ## 支持的平台和后端
 
@@ -928,18 +960,34 @@ jobs:
         - DirectX 11/12
         - Vulkan
         - OpenGL
+        - Dawn WebGPU
         - 编译器: MSVC 2022 + Clang 18
 
         ### Linux (x64, Ubuntu 24.04)
         - Vulkan
         - OpenGL
+        - Dawn WebGPU
         - 编译器: Clang 18
 
         ### Android (arm64, x64)
         - Vulkan
         - OpenGL ES (EGL)
+        - Dawn WebGPU
         - API Level: 24+
         - STL: c++_static
+
+        ## GPU后端架构
+
+        ### Ganesh (传统GPU后端)
+        - 成熟稳定的GPU渲染后端
+        - 支持OpenGL、Vulkan、DirectX等
+        - 兼容现有的Skia应用程序
+
+        ### Graphite (新GPU后端)
+        - 现代化的GPU渲染架构
+        - 更好的多线程支持
+        - 优化的命令缓冲区管理
+        - 支持Dawn WebGPU集成
 
         ## 目录结构
         ```
@@ -977,75 +1025,97 @@ jobs:
         target_link_libraries(MyApp PRIVATE Skia)
         ```
 
-        ### 2. 包含头文件
-        ```cpp
-        #include "include/core/SkCanvas.h"
-        #include "include/core/SkSurface.h"
-        #include "include/gpu/GrDirectContext.h"
+        ### 2. 使用不同的GPU后端
 
-        #ifdef SK_DAWN
-        #include "include/dawn/webgpu_cpp.h"
-        #include "include/gpu/dawn/GrDawnTypes.h"  
+        #### Ganesh后端 (传统)
+        ```cpp
+        #include "include/gpu/GrDirectContext.h"
+        #include "include/gpu/GrBackendSurface.h"
+
+        // 创建OpenGL上下文
+        sk_sp<GrDirectContext> context = GrDirectContext::MakeGL();
+        ```
+
+        #### Graphite后端 (现代)
+        ```cpp
+        #ifdef SK_GRAPHITE
+        #include "include/gpu/graphite/Context.h"
+        #include "include/gpu/graphite/Recorder.h"
+
+        // 创建Graphite上下文
+        std::unique_ptr<skgpu::graphite::Context> context = 
+            skgpu::graphite::Context::MakeDawn(dawnDevice);
         #endif
         ```
 
-        ### 3. Android项目集成
-        对于Android项目，请确保在CMakeLists.txt中设置正确的Android配置:
+        #### Dawn WebGPU集成
+        ```cpp
+        #ifdef SK_DAWN
+        #include "include/dawn/webgpu_cpp.h"
+        #include "include/gpu/graphite/dawn/DawnTypes.h"
 
-        ```cmake
-        set(CMAKE_ANDROID_ARCH_ABI arm64-v8a)  # 或 x86_64
-        set(CMAKE_ANDROID_API 24)
-        find_package(Skia REQUIRED PATHS "${CMAKE_CURRENT_SOURCE_DIR}/Skia")
+        // 初始化WebGPU设备
+        wgpu::Device device = CreateWebGPUDevice();
+        
+        // 创建Graphite上下文
+        auto context = skgpu::graphite::Context::MakeDawn(
+            skgpu::graphite::DawnBackendContext{device}
+        );
+        #endif
         ```
-
-        ## 特殊功能
-
-        ### Dawn WebGPU集成
-        - 包含完整的Dawn WebGPU支持
-        - 自动包含Dawn生成的动态头文件和源码
-        - 支持跨平台WebGPU渲染
-
-        ### 多后端支持
-        - 所有图形后端已合并编译到单一库中
-        - 运行时自动选择最佳后端
-        - 无需手动切换或链接不同的库文件
 
         ## 编译定义
         库会自动设置以下编译定义:
         - `SK_GANESH=1` - 启用Ganesh GPU后端
+        - `SK_GRAPHITE=1` - 启用Graphite GPU后端
         - `SK_GL=1` - 启用OpenGL支持
         - `SK_VULKAN=1` - 启用Vulkan支持
         - `SK_DIRECT3D=1` - 启用DirectX支持 (Windows)
         - `SK_BUILD_FOR_ANDROID=1` - Android构建标识 (Android)
+        - `DAWN_ENABLE_*` - Dawn后端支持标识
+
+        ## 特殊功能
+
+        ### Graphite + Dawn WebGPU
+        - 完整的WebGPU API支持
+        - 跨平台GPU抽象层
+        - 现代化的图形管线
+        - 优化的资源管理
+
+        ### 动态生成文件
+        - 包含Dawn运行时生成的头文件
+        - 自动处理WebGPU绑定
+        - 完整的Tint着色器编译器支持
 
         ## 故障排除
 
         ### 常见问题
-        1. **链接错误**: 确保CMake能找到正确的库文件路径
-        2. **头文件找不到**: 检查include路径是否正确设置
-        3. **运行时错误**: 确保所有必要的系统库都已安装
+        1. **Graphite相关错误**: 确保使用支持的GPU后端
+        2. **Dawn初始化失败**: 检查WebGPU驱动程序支持
+        3. **链接错误**: 确保所有Dawn库都被正确链接
 
         ### 依赖的系统库
         - **Windows**: d3d11.lib, d3d12.lib, dxgi.lib, opengl32.lib, vulkan-1.lib
         - **Linux**: libGL, libvulkan, libX11等X11库
         - **Android**: libGLESv2, libEGL, libvulkan, libandroid
 
+        ## 版本兼容性
+        - 支持最新的WebGPU规范
+        - 兼容Skia主分支API
+        - 支持Graphite实验性功能
+
         ## 技术支持
         如遇到问题，请检查:
         1. CMake版本 >= 3.20
         2. C++编译器支持C++20标准
-        3. 目标平台的图形驱动程序已正确安装
-
-        ## 版本信息
-        - Skia版本: 基于最新主分支
-        - Dawn版本: 基于最新主分支
-        - 构建日期: 自动构建
+        3. 目标平台的WebGPU驱动程序已正确安装
+        4. Graphite功能在目标设备上受支持
         EOF
 
         # 创建构建信息文件
         cat > Skia-Final/BuildInfo.txt << 'EOF'
-        Skia + Dawn 预编译库构建信息
-        =====================================
+        Skia + Dawn + Graphite 预编译库构建信息
+        ===============================================
 
         构建配置:
         - 构建类型: RelWithDebInfo
@@ -1058,8 +1128,9 @@ jobs:
         - Android: Clang (NDK r26d)
 
         启用的Skia功能:
-        - Ganesh GPU后端
-        - Dawn WebGPU支持
+        - Ganesh GPU后端 (传统)
+        - Graphite GPU后端 (现代) ✨
+        - Dawn WebGPU支持 ✨
         - Vulkan支持
         - OpenGL/OpenGL ES支持
         - DirectX 11/12支持 (Windows)
@@ -1070,16 +1141,19 @@ jobs:
         - PDF支持
         - 工具和示例程序
         - 单元测试和基准测试
+        - WebAssembly支持
 
         Dawn配置:
         - 启用的后端: D3D11, D3D12, Vulkan, OpenGL, OpenGL ES
         - 禁用的功能: 示例程序、测试、Node.js绑定
         - 包含动态生成的头文件和源码
+        - 集成Tint着色器编译器
 
-        注意事项:
+        特殊注意事项:
+        - Graphite是Skia的实验性新GPU后端
+        - Dawn提供跨平台WebGPU抽象
         - 所有后端已合并到单一库文件中
-        - Dawn生成的动态文件已包含在头文件目录中
-        - 支持跨平台的CMake集成
+        - 支持现代GPU编程模式
         EOF
 
     - name: 验证构建产物结构
@@ -1118,36 +1192,46 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         tag_name: build-${{ github.run_number }}
-        name: Skia + Dawn 预编译库 v${{ github.run_number }}
+        name: Skia + Dawn + Graphite 预编译库 v${{ github.run_number }}
         body: |
-          # Skia + Dawn 预编译库 自动构建版本
+          # Skia + Dawn + Graphite 预编译库 自动构建版本
 
-          此版本包含经过优化的Skia和Dawn预编译库，支持多平台和多图形后端。
+          此版本包含经过优化的Skia、Dawn WebGPU和Graphite GPU后端预编译库，支持多平台和现代GPU编程。
 
           ## 🚀 新功能特性
+          - **Graphite GPU后端**: 现代化的GPU渲染架构
+          - **Dawn WebGPU集成**: 跨平台WebGPU抽象层
           - **优化的磁盘使用**: 精简构建配置，减少不必要的依赖
           - **多平台支持**: Windows x64, Linux x64, Android arm64/x64
-          - **完整的WebGPU支持**: 集成Dawn WebGPU库
           - **CMake集成**: 开箱即用的CMake配置
 
           ## 📋 支持的图形后端
-          - **Windows**: DirectX 11/12, Vulkan, OpenGL
-          - **Linux**: Vulkan, OpenGL
-          - **Android**: Vulkan, OpenGL ES
+          - **Windows**: DirectX 11/12, Vulkan, OpenGL, WebGPU
+          - **Linux**: Vulkan, OpenGL, WebGPU
+          - **Android**: Vulkan, OpenGL ES, WebGPU
 
           ## 🛠️ 技术规格
           - C++20 标准
           - RelWithDebInfo 构建配置
-          - 禁用测试和示例以减少体积
-          - 包含Dawn动态生成文件
+          - Ganesh + Graphite双GPU后端
+          - Dawn WebGPU支持
+          - 包含动态生成文件
+
+          ## 🎯 适用场景
+          - 现代图形应用程序开发
+          - 跨平台GPU编程
+          - WebGPU应用程序
+          - 高性能2D/3D图形渲染
 
           ## 📦 使用方法
           1. 下载 `Skia.zip` 并解压
           2. 参考包内的 `README.md` 和示例文件
           3. 使用CMake集成到您的项目中
+          4. 选择Ganesh或Graphite GPU后端
 
           ## ⚠️ 注意事项
-          - 确保目标系统已安装相应的图形驱动
+          - Graphite是实验性GPU后端，API可能会变化
+          - 确保目标系统支持WebGPU
           - Android需要API Level 24或更高版本
           - 建议使用CMake 3.20或更高版本
         files: Skia.zip
