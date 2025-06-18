@@ -1,4 +1,4 @@
-name: Build Skia and Dawn
+name: 构建Skia和Dawn
 
 on:
   workflow_dispatch:
@@ -33,10 +33,15 @@ jobs:
 
     - name: 安装构建工具
       run: |
+        # 安装Ninja和其他必要工具
         choco install ninja -y
         choco install git -y
         pip install requests six
+        
+        # 安装LLVM/Clang 18
         choco install llvm --version=18.1.8 -y
+        
+        # 设置环境变量
         echo "LLVM_ROOT=C:\Program Files\LLVM" >> $env:GITHUB_ENV
         echo "C:\Program Files\LLVM\bin" >> $env:GITHUB_PATH
       shell: powershell
@@ -51,18 +56,28 @@ jobs:
 
     - name: 手动下载depot_tools
       run: |
+        # 直接从镜像下载depot_tools
         git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git
+        
+        # 添加到PATH
         $depotToolsPath = "$pwd\depot_tools"
         echo $depotToolsPath >> $env:GITHUB_PATH
+        
+        # 禁用自动更新
         New-Item -Path "$depotToolsPath\.disable_auto_update" -ItemType File -Force
       shell: powershell
 
     - name: 下载和配置Skia源码
       run: |
+        # 创建工作目录
         mkdir skia-workspace
         cd skia-workspace
+        
+        # 直接克隆Skia仓库
         git clone --branch $env:SKIA_VERSION --depth 1 https://skia.googlesource.com/skia.git
         cd skia
+        
+        # 手动下载依赖项（跳过gclient）
         python tools/git-sync-deps --skip-py-compile
       shell: powershell
       continue-on-error: true
@@ -70,24 +85,29 @@ jobs:
     - name: 手动下载Skia依赖项
       run: |
         cd skia-workspace/skia
+        
+        # 手动克隆主要依赖项
         if (!(Test-Path "third_party/externals")) {
           mkdir third_party/externals -Force
         }
-        $deps = @{
-          "harfbuzz" = "https://chromium.googlesource.com/external/github.com/harfbuzz/harfbuzz.git"
-          "icu" = "https://chromium.googlesource.com/chromium/deps/icu.git"
-          "libpng" = "https://skia.googlesource.com/third_party/libpng.git"
-          "zlib" = "https://chromium.googlesource.com/chromium/src/third_party/zlib.git"
-          "libjpeg-turbo" = "https://chromium.googlesource.com/chromium/deps/libjpeg_turbo.git"
-          "libwebp" = "https://chromium.googlesource.com/webm/libwebp.git"
-          "freetype" = "https://chromium.googlesource.com/chromium/src/third_party/freetype2.git"
-          "expat" = "https://chromium.googlesource.com/external/github.com/libexpat/libexpat.git"
-        }
-        foreach ($dep in $deps.GetEnumerator()) {
-          $path = "third_party/externals/$($dep.Key)"
+        
+        # 下载关键依赖项
+        $dependencies = @(
+          @{name="harfbuzz"; url="https://chromium.googlesource.com/external/github.com/harfbuzz/harfbuzz.git"},
+          @{name="icu"; url="https://chromium.googlesource.com/chromium/deps/icu.git"},
+          @{name="libpng"; url="https://skia.googlesource.com/third_party/libpng.git"},
+          @{name="zlib"; url="https://chromium.googlesource.com/chromium/src/third_party/zlib.git"},
+          @{name="libjpeg-turbo"; url="https://chromium.googlesource.com/chromium/deps/libjpeg_turbo.git"},
+          @{name="libwebp"; url="https://chromium.googlesource.com/webm/libwebp.git"},
+          @{name="freetype"; url="https://chromium.googlesource.com/chromium/src/third_party/freetype2.git"},
+          @{name="expat"; url="https://chromium.googlesource.com/external/github.com/libexpat/libexpat.git"}
+        )
+        
+        foreach ($dep in $dependencies) {
+          $path = "third_party/externals/$($dep.name)"
           if (!(Test-Path $path)) {
-            Write-Host "正在下载 $($dep.Key)..."
-            git clone --depth 1 $dep.Value $path
+            Write-Host "正在下载 $($dep.name)..."
+            git clone --depth 1 $dep.url $path
           }
         }
       shell: powershell
@@ -96,11 +116,17 @@ jobs:
     - name: 下载和配置Dawn
       run: |
         cd skia-workspace
+        
+        # 克隆Dawn仓库
         git clone --branch $env:DAWN_VERSION --depth 1 https://dawn.googlesource.com/dawn.git
         cd dawn
+        
+        # 手动下载Dawn的关键依赖项
         if (!(Test-Path "third_party")) {
           mkdir third_party -Force
         }
+        
+        # 下载Dawn依赖项
         git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git third_party/spirv-headers
         git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git third_party/spirv-tools
         git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git third_party/vulkan-headers
@@ -111,11 +137,15 @@ jobs:
     - name: 编译Dawn
       run: |
         cd skia-workspace/dawn
+        
+        # 创建构建目录
         mkdir -p out/RelWithDebInfo
-        $gnArgs = @"
+        
+        # 创建GN配置文件内容
+        $gnContent = @'
 is_debug = false
 is_component_build = false
-target_cpu = "${{ matrix.arch }}"
+target_cpu = "x64"
 dawn_enable_d3d11 = true
 dawn_enable_d3d12 = true
 dawn_enable_vulkan = true
@@ -129,8 +159,12 @@ dawn_build_samples = false
 dawn_standalone = true
 use_custom_libcxx = false
 clang_use_chrome_plugins = false
-"@
-        $gnArgs | Out-File -FilePath "out/RelWithDebInfo/args.gn" -Encoding utf8
+'@
+        
+        # 写入配置文件
+        $gnContent | Out-File -FilePath "out/RelWithDebInfo/args.gn" -Encoding utf8
+        
+        # 运行GN和Ninja
         gn gen out/RelWithDebInfo
         ninja -C out/RelWithDebInfo
       shell: powershell
@@ -138,11 +172,15 @@ clang_use_chrome_plugins = false
     - name: 编译Skia
       run: |
         cd skia-workspace/skia
+        
+        # 创建构建目录
         mkdir -p out/RelWithDebInfo
-        $gnArgs = @"
+        
+        # 创建GN配置文件内容
+        $gnContent = @'
 is_debug = false
 is_component_build = false
-target_cpu = "${{ matrix.arch }}"
+target_cpu = "x64"
 cc = "clang"
 cxx = "clang++"
 clang_win = "C:/Program Files/LLVM"
@@ -172,39 +210,48 @@ skia_use_system_expat = false
 skia_use_system_freetype2 = false
 
 extra_cflags_cc = ["-std=c++20"]
-"@
-        $gnArgs | Out-File -FilePath "out/RelWithDebInfo/args.gn" -Encoding utf8
+'@
+        
+        # 写入配置文件
+        $gnContent | Out-File -FilePath "out/RelWithDebInfo/args.gn" -Encoding utf8
+        
+        # 运行GN和Ninja
         gn gen out/RelWithDebInfo
         ninja -C out/RelWithDebInfo
       shell: powershell
 
     - name: 收集Windows构建产物
       run: |
-        mkdir -p artifacts/Windows/${{ matrix.arch }}/include
-        mkdir -p artifacts/Windows/${{ matrix.arch }}/lib
-        mkdir -p artifacts/Windows/${{ matrix.arch }}/bin
+        # 创建输出目录
+        mkdir -p artifacts/Windows/x64/include
+        mkdir -p artifacts/Windows/x64/lib
+        mkdir -p artifacts/Windows/x64/bin
         
+        # 复制Skia头文件
         if (Test-Path "skia-workspace/skia/include") {
-          Copy-Item -Recurse -Force "skia-workspace/skia/include/*" "artifacts/Windows/${{ matrix.arch }}/include/"
+          Copy-Item -Recurse -Force "skia-workspace/skia/include/*" "artifacts/Windows/x64/include/"
         }
         
+        # 复制Dawn生成的头文件
         if (Test-Path "skia-workspace/dawn/out/RelWithDebInfo/gen/include") {
-          Copy-Item -Recurse -Force "skia-workspace/dawn/out/RelWithDebInfo/gen/include/*" "artifacts/Windows/${{ matrix.arch }}/include/"
+          Copy-Item -Recurse -Force "skia-workspace/dawn/out/RelWithDebInfo/gen/include/*" "artifacts/Windows/x64/include/"
         }
         
-        Get-ChildItem -Path "skia-workspace/skia/out/RelWithDebInfo" -Filter "*.lib" -Recurse | Copy-Item -Destination "artifacts/Windows/${{ matrix.arch }}/lib/"
-        Get-ChildItem -Path "skia-workspace/dawn/out/RelWithDebInfo" -Filter "*.lib" -Recurse | Copy-Item -Destination "artifacts/Windows/${{ matrix.arch }}/lib/"
+        # 复制库文件
+        Get-ChildItem -Path "skia-workspace/skia/out/RelWithDebInfo" -Filter "*.lib" -Recurse | Copy-Item -Destination "artifacts/Windows/x64/lib/"
+        Get-ChildItem -Path "skia-workspace/dawn/out/RelWithDebInfo" -Filter "*.lib" -Recurse | Copy-Item -Destination "artifacts/Windows/x64/lib/"
         
-        Get-ChildItem -Path "skia-workspace/skia/out/RelWithDebInfo" -Filter "*.exe" -Recurse -ErrorAction SilentlyContinue | Copy-Item -Destination "artifacts/Windows/${{ matrix.arch }}/bin/"
-        Get-ChildItem -Path "skia-workspace/skia/out/RelWithDebInfo" -Filter "*.dll" -Recurse -ErrorAction SilentlyContinue | Copy-Item -Destination "artifacts/Windows/${{ matrix.arch }}/bin/"
-        Get-ChildItem -Path "skia-workspace/dawn/out/RelWithDebInfo" -Filter "*.dll" -Recurse -ErrorAction SilentlyContinue | Copy-Item -Destination "artifacts/Windows/${{ matrix.arch }}/bin/"
+        # 复制可执行文件和DLL
+        Get-ChildItem -Path "skia-workspace/skia/out/RelWithDebInfo" -Filter "*.exe" -Recurse -ErrorAction SilentlyContinue | Copy-Item -Destination "artifacts/Windows/x64/bin/"
+        Get-ChildItem -Path "skia-workspace/skia/out/RelWithDebInfo" -Filter "*.dll" -Recurse -ErrorAction SilentlyContinue | Copy-Item -Destination "artifacts/Windows/x64/bin/"
+        Get-ChildItem -Path "skia-workspace/dawn/out/RelWithDebInfo" -Filter "*.dll" -Recurse -ErrorAction SilentlyContinue | Copy-Item -Destination "artifacts/Windows/x64/bin/"
       shell: powershell
 
     - name: 上传Windows构建产物
       uses: actions/upload-artifact@v4
       with:
-        name: skia-dawn-windows-${{ matrix.arch }}
-        path: artifacts/Windows/${{ matrix.arch }}
+        name: skia-dawn-windows-x64
+        path: artifacts/Windows/x64
 
   build-linux:
     runs-on: ubuntu-24.04
@@ -249,6 +296,7 @@ extra_cflags_cc = ["-std=c++20"]
 
     - name: 下载GN构建工具
       run: |
+        # 下载GN二进制文件
         wget https://chrome-infra-packages.appspot.com/dl/gn/gn/linux-amd64/+/latest -O gn.zip
         unzip gn.zip
         chmod +x gn
@@ -256,10 +304,17 @@ extra_cflags_cc = ["-std=c++20"]
 
     - name: 下载和配置Skia源码
       run: |
+        # 创建工作目录
         mkdir skia-workspace && cd skia-workspace
+        
+        # 直接克隆Skia仓库
         git clone --branch ${{ env.SKIA_VERSION }} --depth 1 https://skia.googlesource.com/skia.git
         cd skia
+        
+        # 手动下载依赖项
         mkdir -p third_party/externals
+        
+        # 下载关键依赖项
         git clone --depth 1 https://chromium.googlesource.com/external/github.com/harfbuzz/harfbuzz.git third_party/externals/harfbuzz
         git clone --depth 1 https://chromium.googlesource.com/chromium/deps/icu.git third_party/externals/icu
         git clone --depth 1 https://skia.googlesource.com/third_party/libpng.git third_party/externals/libpng
@@ -272,9 +327,14 @@ extra_cflags_cc = ["-std=c++20"]
     - name: 下载和配置Dawn
       run: |
         cd skia-workspace
+        
+        # 克隆Dawn仓库
         git clone --branch ${{ env.DAWN_VERSION }} --depth 1 https://dawn.googlesource.com/dawn.git
         cd dawn
+        
+        # 手动下载Dawn的关键依赖项
         mkdir -p third_party
+        
         git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git third_party/spirv-headers
         git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git third_party/spirv-tools
         git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git third_party/vulkan-headers
@@ -285,10 +345,12 @@ extra_cflags_cc = ["-std=c++20"]
       run: |
         cd skia-workspace/dawn
         mkdir -p out/RelWithDebInfo
+        
+        # 配置Dawn构建
         cat > out/RelWithDebInfo/args.gn << 'EOF'
 is_debug = false
 is_component_build = false
-target_cpu = "${{ matrix.arch }}"
+target_cpu = "x64"
 dawn_enable_vulkan = true
 dawn_enable_desktop_gl = true
 dawn_enable_opengles = false
@@ -303,6 +365,7 @@ clang_use_chrome_plugins = false
 cc = "clang-18"
 cxx = "clang++-18"
 EOF
+        
         gn gen out/RelWithDebInfo
         ninja -C out/RelWithDebInfo
 
@@ -310,10 +373,12 @@ EOF
       run: |
         cd skia-workspace/skia
         mkdir -p out/RelWithDebInfo
+        
+        # 配置Skia构建参数
         cat > out/RelWithDebInfo/args.gn << 'EOF'
 is_debug = false
 is_component_build = false
-target_cpu = "${{ matrix.arch }}"
+target_cpu = "x64"
 cc = "clang-18"
 cxx = "clang++-18"
 
@@ -339,31 +404,35 @@ skia_use_system_freetype2 = false
 
 extra_cflags_cc = ["-std=c++20"]
 EOF
+        
         gn gen out/RelWithDebInfo
         ninja -C out/RelWithDebInfo
 
     - name: 收集Linux构建产物
       run: |
-        mkdir -p artifacts/Linux/${{ matrix.arch }}/include
-        mkdir -p artifacts/Linux/${{ matrix.arch }}/lib
-        mkdir -p artifacts/Linux/${{ matrix.arch }}/bin
+        mkdir -p artifacts/Linux/x64/include
+        mkdir -p artifacts/Linux/x64/lib
+        mkdir -p artifacts/Linux/x64/bin
         
-        cp -r skia-workspace/skia/include/* artifacts/Linux/${{ matrix.arch }}/include/
+        # 复制Skia头文件
+        cp -r skia-workspace/skia/include/* artifacts/Linux/x64/include/
         
+        # 复制Dawn生成的头文件
         if [ -d "skia-workspace/dawn/out/RelWithDebInfo/gen/include" ]; then
-          cp -r skia-workspace/dawn/out/RelWithDebInfo/gen/include/* artifacts/Linux/${{ matrix.arch }}/include/
+          cp -r skia-workspace/dawn/out/RelWithDebInfo/gen/include/* artifacts/Linux/x64/include/
         fi
         
-        find skia-workspace/skia/out/RelWithDebInfo -name "*.a" -exec cp {} artifacts/Linux/${{ matrix.arch }}/lib/ \;
-        find skia-workspace/dawn/out/RelWithDebInfo -name "*.a" -exec cp {} artifacts/Linux/${{ matrix.arch }}/lib/ \;
-        find skia-workspace/skia/out/RelWithDebInfo -name "*.so" -exec cp {} artifacts/Linux/${{ matrix.arch }}/lib/ \; 2>/dev/null || true
-        find skia-workspace/dawn/out/RelWithDebInfo -name "*.so" -exec cp {} artifacts/Linux/${{ matrix.arch }}/lib/ \; 2>/dev/null || true
+        # 复制库文件
+        find skia-workspace/skia/out/RelWithDebInfo -name "*.a" -exec cp {} artifacts/Linux/x64/lib/ \;
+        find skia-workspace/dawn/out/RelWithDebInfo -name "*.a" -exec cp {} artifacts/Linux/x64/lib/ \;
+        find skia-workspace/skia/out/RelWithDebInfo -name "*.so" -exec cp {} artifacts/Linux/x64/lib/ \; 2>/dev/null || true
+        find skia-workspace/dawn/out/RelWithDebInfo -name "*.so" -exec cp {} artifacts/Linux/x64/lib/ \; 2>/dev/null || true
 
     - name: 上传Linux构建产物
       uses: actions/upload-artifact@v4
       with:
-        name: skia-dawn-linux-${{ matrix.arch }}
-        path: artifacts/Linux/${{ matrix.arch }}
+        name: skia-dawn-linux-x64
+        path: artifacts/Linux/x64
 
   build-android:
     runs-on: ubuntu-24.04
@@ -397,6 +466,7 @@ EOF
 
     - name: 下载GN构建工具
       run: |
+        # 下载GN二进制文件
         wget https://chrome-infra-packages.appspot.com/dl/gn/gn/linux-amd64/+/latest -O gn.zip
         unzip gn.zip
         chmod +x gn
@@ -404,10 +474,17 @@ EOF
 
     - name: 下载和配置Skia源码
       run: |
+        # 创建工作目录
         mkdir skia-workspace && cd skia-workspace
+        
+        # 直接克隆Skia仓库
         git clone --branch ${{ env.SKIA_VERSION }} --depth 1 https://skia.googlesource.com/skia.git
         cd skia
+        
+        # 手动下载依赖项
         mkdir -p third_party/externals
+        
+        # 下载关键依赖项
         git clone --depth 1 https://chromium.googlesource.com/external/github.com/harfbuzz/harfbuzz.git third_party/externals/harfbuzz
         git clone --depth 1 https://chromium.googlesource.com/chromium/deps/icu.git third_party/externals/icu
         git clone --depth 1 https://skia.googlesource.com/third_party/libpng.git third_party/externals/libpng
@@ -420,9 +497,14 @@ EOF
     - name: 下载和配置Dawn
       run: |
         cd skia-workspace
+        
+        # 克隆Dawn仓库
         git clone --branch ${{ env.DAWN_VERSION }} --depth 1 https://dawn.googlesource.com/dawn.git
         cd dawn
+        
+        # 手动下载Dawn的关键依赖项
         mkdir -p third_party
+        
         git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git third_party/spirv-headers
         git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git third_party/spirv-tools
         git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git third_party/vulkan-headers
@@ -433,11 +515,20 @@ EOF
       run: |
         cd skia-workspace/dawn
         mkdir -p out/RelWithDebInfo
+        
+        # 确定目标CPU架构
+        if [ "${{ matrix.arch }}" = "arm64" ]; then
+          TARGET_CPU="arm64"
+        else
+          TARGET_CPU="x64"
+        fi
+        
+        # 配置Dawn构建
         cat > out/RelWithDebInfo/args.gn << EOF
 is_debug = false
 is_component_build = false
 target_os = "android"
-target_cpu = "${{ matrix.arch == 'arm64' && 'arm64' || 'x64' }}"
+target_cpu = "${TARGET_CPU}"
 android_ndk_root = "${{ env.ANDROID_NDK_LATEST_HOME }}"
 dawn_enable_vulkan = true
 dawn_enable_opengles = true
@@ -451,6 +542,7 @@ dawn_standalone = true
 use_custom_libcxx = false
 clang_use_chrome_plugins = false
 EOF
+        
         gn gen out/RelWithDebInfo
         ninja -C out/RelWithDebInfo
 
@@ -458,11 +550,20 @@ EOF
       run: |
         cd skia-workspace/skia
         mkdir -p out/RelWithDebInfo
+        
+        # 确定目标CPU架构
+        if [ "${{ matrix.arch }}" = "arm64" ]; then
+          TARGET_CPU="arm64"
+        else
+          TARGET_CPU="x64"
+        fi
+        
+        # 配置Skia构建参数
         cat > out/RelWithDebInfo/args.gn << EOF
 is_debug = false
 is_component_build = false
 target_os = "android"
-target_cpu = "${{ matrix.arch == 'arm64' && 'arm64' || 'x64' }}"
+target_cpu = "${TARGET_CPU}"
 android_ndk_root = "${{ env.ANDROID_NDK_LATEST_HOME }}"
 
 skia_use_dawn = true
@@ -487,6 +588,7 @@ skia_use_system_freetype2 = false
 
 extra_cflags_cc = ["-std=c++20"]
 EOF
+        
         gn gen out/RelWithDebInfo
         ninja -C out/RelWithDebInfo
 
@@ -496,12 +598,15 @@ EOF
         mkdir -p artifacts/Android/${{ matrix.arch }}/lib
         mkdir -p artifacts/Android/${{ matrix.arch }}/bin
         
+        # 复制Skia头文件
         cp -r skia-workspace/skia/include/* artifacts/Android/${{ matrix.arch }}/include/
         
+        # 复制Dawn生成的头文件
         if [ -d "skia-workspace/dawn/out/RelWithDebInfo/gen/include" ]; then
           cp -r skia-workspace/dawn/out/RelWithDebInfo/gen/include/* artifacts/Android/${{ matrix.arch }}/include/
         fi
         
+        # 复制库文件
         find skia-workspace/skia/out/RelWithDebInfo -name "*.a" -exec cp {} artifacts/Android/${{ matrix.arch }}/lib/ \;
         find skia-workspace/dawn/out/RelWithDebInfo -name "*.a" -exec cp {} artifacts/Android/${{ matrix.arch }}/lib/ \;
         find skia-workspace/skia/out/RelWithDebInfo -name "*.so" -exec cp {} artifacts/Android/${{ matrix.arch }}/lib/ \; 2>/dev/null || true
@@ -528,29 +633,36 @@ EOF
 
     - name: 组织最终目录结构
       run: |
+        # 创建Skia目录结构
         mkdir -p Skia/include/{include,dawn,modules}
         mkdir -p Skia/bin/{Win/x64,Linux/x64,Android/{arm64,x64}}
         mkdir -p Skia/lib/{Win/x64,Linux/x64,Android/{arm64,x64}}
         
+        # 复制头文件（使用Windows版本作为主要头文件源）
         if [ -d "all-artifacts/skia-dawn-windows-x64/include" ]; then
           cp -r all-artifacts/skia-dawn-windows-x64/include/* Skia/include/include/
         fi
         
+        # 复制各平台的库文件和二进制文件
+        # Windows
         if [ -d "all-artifacts/skia-dawn-windows-x64" ]; then
           cp -r all-artifacts/skia-dawn-windows-x64/lib/* Skia/lib/Win/x64/ 2>/dev/null || true
           cp -r all-artifacts/skia-dawn-windows-x64/bin/* Skia/bin/Win/x64/ 2>/dev/null || true
         fi
         
+        # Linux
         if [ -d "all-artifacts/skia-dawn-linux-x64" ]; then
           cp -r all-artifacts/skia-dawn-linux-x64/lib/* Skia/lib/Linux/x64/ 2>/dev/null || true
           cp -r all-artifacts/skia-dawn-linux-x64/bin/* Skia/bin/Linux/x64/ 2>/dev/null || true
         fi
         
+        # Android ARM64
         if [ -d "all-artifacts/skia-dawn-android-arm64" ]; then
           cp -r all-artifacts/skia-dawn-android-arm64/lib/* Skia/lib/Android/arm64/ 2>/dev/null || true
           cp -r all-artifacts/skia-dawn-android-arm64/bin/* Skia/bin/Android/arm64/ 2>/dev/null || true
         fi
         
+        # Android x64
         if [ -d "all-artifacts/skia-dawn-android-x64" ]; then
           cp -r all-artifacts/skia-dawn-android-x64/lib/* Skia/lib/Android/x64/ 2>/dev/null || true
           cp -r all-artifacts/skia-dawn-android-x64/bin/* Skia/bin/Android/x64/ 2>/dev/null || true
@@ -615,8 +727,10 @@ target_include_directories(Skia INTERFACE
 
 # 查找并链接Skia库文件
 if(WIN32)
+    # Windows静态库
     file(GLOB SKIA_LIBRARIES "${SKIA_LIB_DIR}/*.lib")
 elseif(UNIX)
+    # Linux/Android静态库
     file(GLOB SKIA_LIBRARIES "${SKIA_LIB_DIR}/*.a")
 endif()
 
@@ -734,6 +848,7 @@ EOF
 
 include(CMakeFindDependencyMacro)
 
+# 查找依赖项
 if(WIN32)
     # Windows平台依赖项已在目标中定义
 elseif(ANDROID)
@@ -785,6 +900,17 @@ EOF
              find_package(Skia REQUIRED)
              target_link_libraries(your_target Skia::Skia)
              ```
+          
+          ### 目录结构:
+          ```
+          Skia/
+          ├── include/include/     # Skia核心头文件
+          ├── include/dawn/        # Dawn头文件
+          ├── include/modules/     # Skia模块头文件
+          ├── bin/                 # 各平台二进制文件
+          ├── lib/                 # 各平台库文件
+          └── CMakeLists.txt       # CMake配置文件
+          ```
         files: Skia.zip
         draft: false
         prerelease: false
