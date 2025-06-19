@@ -1,13 +1,13 @@
-name: 编译 Skia + Dawn 全平台构建包
+name: 编译 Skia + Dawn 全平台构建包（含缓存与浅克隆优化）
 
 on:
   push:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
-  workflow_dispatch:  # 手动触发
+  workflow_dispatch:
   schedule:
-    # 每天北京时间上午8点（UTC 0点）执行
+    # 每天 UTC 00:00 触发（北京时间 08:00）
     - cron: '0 0 * * *'
 
 permissions:
@@ -20,7 +20,7 @@ env:
 
 jobs:
   build:
-    name: 构建 Skia + Dawn (${ { matrix.platform } })
+    name: 构建 Skia + Dawn (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -53,11 +53,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # ---------- 预留清理空间步骤 ----------
+      - name: 清理 runner 临时文件（如有必要）
+        if: runner.os == 'Linux'
+        run: |
+          sudo rm -rf /home/runner/work/_temp/*
+          sudo rm -rf /home/runner/work/_toolcache/*
+          sudo apt-get clean
+        # Windows 托管 runner 一般不允许 sudo，若使用自托管可按需清理
+
+      # ---------- 设置 Python ----------
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
+      # ---------- 安装 Linux 依赖 ----------
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -66,59 +77,96 @@ jobs:
             libfontconfig1-dev libfreetype6-dev libgl1-mesa-dev libvulkan-dev vulkan-tools \
             libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libx11-dev libicu-dev libharfbuzz-dev \
             openjdk-11-jdk
-          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-18 100
-          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-18 100
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100
-          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 100
+          # 优化：清理 apt 缓存，腾出空间
+          sudo apt-get clean
 
+      # ---------- 安装 Windows 依赖 ----------
       - name: Install Windows dependencies
         if: runner.os == 'Windows'
         run: |
           choco install ninja -y
           choco install llvm --version=18.1.8 --force -y
+          # 将 LLVM bin 加入 PATH
           echo "C:\\Program Files\\LLVM\\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          
+
+      # ---------- Setup MSBuild（Windows） ----------
       - name: Setup MSBuild
         if: runner.os == 'Windows'
         uses: microsoft/setup-msbuild@v2
 
+      # ---------- Setup Android NDK ----------
       - name: Setup Android NDK
         if: matrix.target_os == 'android'
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r26d
 
+      # ---------- 缓存 depot_tools ----------
+      - name: Cache depot_tools
+        uses: actions/cache@v3
+        with:
+          path: ${{ github.workspace }}/depot_tools
+          # key 可以根据 repo 内容变化，或按固定版本、日期等。此处示例基于 runner.os + 固定 key，确保同一 runner.os 下复用
+          key: ${{ runner.os }}-depot-tools-v1
+          restore-keys: |
+            ${{ runner.os }}-depot-tools-
+
+      # ---------- 获取 depot_tools ----------
       - name: Get depot_tools
         run: |
-          git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+          # 如果缓存未命中会执行 clone；如果已存在目录，则跳过
+          if [ ! -d "${{ github.workspace }}/depot_tools" ]; then
+            git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git "${{ github.workspace }}/depot_tools"
+          else
+            echo "depot_tools 已存在，跳过 clone"
+          fi
+          # 将 depot_tools 加入 PATH
           echo "${{ github.workspace }}/depot_tools" >> $GITHUB_PATH
         shell: bash
 
+      # ---------- 配置 depot_tools 在 Windows 上（Bash） ----------
       - name: Configure depot_tools on Windows
         if: runner.os == 'Windows'
         run: |
+          # 假设您在 runner 上预先准备了 depot_tools，在 Windows 上用 bash 方式追加
           echo "C:\\a\\SkiaGenerator\\SkiaGenerator\\depot_tools" >> $GITHUB_PATH
         shell: bash
 
+      # ---------- Fetch Skia with gclient sync（浅同步） ----------
       - name: Fetch Skia
         run: |
           export PATH=${{ github.workspace }}/depot_tools:$PATH
+          # 清理旧目录（若上次残留）
+          rm -rf skia-build
           mkdir skia-build && cd skia-build
           gclient config --name skia https://skia.googlesource.com/skia.git
-          gclient sync
+          # 使用 --no-history 减少拉取历史；如需更节省，可尝试 --shallow（依据 gclient 版本支持）
+          gclient sync --no-history --jobs 4
         shell: bash
 
+      # ---------- Fetch Dawn（浅克隆 + 依赖拉取） ----------
       - name: Fetch Dawn
         run: |
-          git clone --recursive https://dawn.googlesource.com/dawn.git dawn-source
+          # 清理旧目录
+          rm -rf dawn-source
+          # 浅克隆 Dawn，包含子模块浅同步（如果 Git 版本支持 --shallow-submodules）
+          git clone --depth 1 --recursive --shallow-submodules https://dawn.googlesource.com/dawn.git dawn-source || {
+            echo "Shallow clone 不支持? 尝试不带 --shallow-submodules";
+            rm -rf dawn-source;
+            git clone --depth 1 --recursive https://dawn.googlesource.com/dawn.git dawn-source;
+          }
+          # 进入拉取依赖
           cd dawn-source
           python3 tools/fetch_dawn_dependencies.py
         shell: bash
 
+      # ---------- Configure Dawn ----------
       - name: Configure Dawn
         run: |
           cd dawn-source
-          mkdir -p build-${{ matrix.platform }} && cd build-${{ matrix.platform }}
+          BUILD_DIR="build-${{ matrix.platform }}"
+          rm -rf ${BUILD_DIR}
+          mkdir -p ${BUILD_DIR} && cd ${BUILD_DIR}
           case "${{ matrix.target_os }}" in
             win)
               cmake .. -G "Visual Studio 17 2022" -A ${{ matrix.arch }} -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
@@ -143,6 +191,7 @@ jobs:
           esac
         shell: bash
 
+      # ---------- Build Dawn ----------
       - name: Build Dawn
         run: |
           cd dawn-source/build-${{ matrix.platform }}
@@ -154,12 +203,14 @@ jobs:
           echo "✅ Dawn 编译完成"
         shell: bash
 
+      # ---------- Configure Skia ----------
       - name: Configure Skia
         run: |
           cd skia-build/skia
           export PATH=${{ github.workspace }}/depot_tools:$PATH
           python3 tools/git-sync-deps
-          args="is_official_build=false is_debug=false extra_cflags=[\"-O2\", \"-g\"] skia_use_dawn=true skia_dawn_dir=\"../../dawn-source\""
+          # 这里用 no-history 已在同步时减少了历史；后续 build args 按需定制
+          args="is_official_build=false is_debug=false extra_cflags=[\"-O2\",\"-g\"] skia_use_dawn=true skia_dawn_dir=\"../../dawn-source\""
           args+=" skia_enable_gpu=true skia_use_gl=true skia_use_vulkan=true skia_enable_spirv_validation=false"
           args+=" skia_enable_pdf=true skia_enable_skottie=true skia_enable_skshaper=true skia_enable_svg=true skia_use_icu=true"
           args+=" skia_enable_tools=false target_os=\"${{ matrix.target_os }}\" target_cpu=\"${{ matrix.arch }}\""
@@ -169,7 +220,7 @@ jobs:
               ;;
             linux)
               args+=" skia_use_x11=true skia_use_freetype=true skia_use_fontconfig=true skia_use_harfbuzz=true cc=clang-18 cxx=clang++-18"
-              ;;  
+              ;;
             android)
               args+=" ndk=\"$ANDROID_NDK_HOME\" android_api_level=${{ matrix.android_api }} skia_use_freetype=true skia_enable_fontmgr_android=true skia_use_vulkan=true skia_use_harfbuzz=true"
               ;;
@@ -177,6 +228,7 @@ jobs:
           echo "BUILD_ARGS=$args" >> $GITHUB_ENV
         shell: bash
 
+      # ---------- Generate Skia build files ----------
       - name: Generate Skia build files
         run: |
           cd skia-build/skia
@@ -184,6 +236,7 @@ jobs:
           bin/gn gen out/Release --args="$BUILD_ARGS"
         shell: bash
 
+      # ---------- Build Skia ----------
       - name: Build Skia
         run: |
           cd skia-build/skia
@@ -192,6 +245,7 @@ jobs:
           echo "✅ Skia 编译完成"
         shell: bash
 
+      # ---------- Collect Dawn 生成头文件等 ----------
       - name: Collect Dawn generated
         run: |
           mkdir -p dawn-gen/include/dawn dawn-gen/include/webgpu dawn-gen/src/dawn dawn-gen/src/emdawnwebgpu dawn-gen/webgpu-headers
@@ -202,6 +256,7 @@ jobs:
           cp -r dawn-source/build-${{ matrix.platform }}/gen/webgpu-headers/* dawn-gen/webgpu-headers/ || true
         shell: bash
 
+      # ---------- Package artifacts ----------
       - name: Package artifacts
         run: |
           mkdir -p Skia/include/core Skia/include/dawn Skia/include/modules Skia/lib/${{ matrix.target_os }}/${{ matrix.arch }} Skia/bin/${{ matrix.target_os }}/${{ matrix.arch }}
@@ -214,6 +269,7 @@ jobs:
           echo "✅ 打包完成"
         shell: bash
 
+      # ---------- Zip ----------
       - name: Zip
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
@@ -223,6 +279,7 @@ jobs:
           fi
         shell: bash
 
+      # ---------- Upload artifact ----------
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
