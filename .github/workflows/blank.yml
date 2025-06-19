@@ -76,8 +76,8 @@ jobs:
         run: |
           choco install ninja -y
           choco install llvm --version=18.1.8 --force -y
-          echo "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
+          echo "C:\\Program Files\\LLVM\\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          
       - name: Setup MSBuild
         if: runner.os == 'Windows'
         uses: microsoft/setup-msbuild@v2
@@ -97,8 +97,7 @@ jobs:
       - name: Configure depot_tools on Windows
         if: runner.os == 'Windows'
         run: |
-          echo "${{ github.workspace }}\depot_tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          echo "DEPOT_TOOLS_WIN_TOOLCHAIN=0" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "C:\\a\\SkiaGenerator\\SkiaGenerator\\depot_tools" >> $GITHUB_PATH
         shell: bash
 
       - name: Fetch Skia
@@ -123,13 +122,13 @@ jobs:
           case "${{ matrix.target_os }}" in
             win)
               cmake .. -G "Visual Studio 17 2022" -A ${{ matrix.arch }} -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
-                -DDAWN_BUILD_SAMPLES=OFF -DDAWN_BUILD_TESTS=OFF \ 
+                -DDAWN_BUILD_SAMPLES=OFF -DDAWN_BUILD_TESTS=OFF \
                 -DDAWN_ENABLE_D3D11=ON -DDAWN_ENABLE_D3D12=ON -DDAWN_ENABLE_VULKAN=ON -DDAWN_ENABLE_OPENGL=ON \
                 -DCMAKE_CXX_STANDARD=20 -DDAWN_USE_BUILT_DXC=ON
               ;;
             linux)
-              cmake .. -G Ninja -DCMAKE_BUILD_TYPE=$BUILD_TYPE \ 
-                -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 \ 
+              cmake .. -G Ninja -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
+                -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 \
                 -DDAWN_BUILD_SAMPLES=OFF -DDAWN_BUILD_TESTS=OFF -DDAWN_ENABLE_VULKAN=ON -DDAWN_ENABLE_OPENGL=ON \
                 -DCMAKE_CXX_STANDARD=20
               ;;
@@ -218,7 +217,7 @@ jobs:
       - name: Zip
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
-            powershell "Compress-Archive -Path Skia\* -DestinationPath ${{ matrix.platform }}.zip"
+            powershell "Compress-Archive -Path Skia\\* -DestinationPath ${{ matrix.platform }}.zip"
           else
             zip -r "${{ matrix.platform }}.zip" Skia/
           fi
