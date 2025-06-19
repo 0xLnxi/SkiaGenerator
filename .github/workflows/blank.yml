@@ -26,26 +26,25 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Windows x64 (MSVC2022 + Clang18)
           - os: windows-2022
             platform: x64_windows
             target_os: win
             arch: x64
             compiler: msvc2022
-          # Linux x64 (Clang18)
+
           - os: ubuntu-24.04
             platform: x64_linux
             target_os: linux
             arch: x64
             compiler: clang18
-          # Android x64 (Clang18)
+
           - os: ubuntu-24.04
             platform: x64_android
             target_os: android
             arch: x64
             android_api: 21
             compiler: clang18
-          # Android ARM64 (Clang18)
+
           - os: ubuntu-24.04
             platform: arm64_android
             target_os: android
@@ -199,17 +198,14 @@ jobs:
       - name: Collect Dawn generated files
         run: |
           mkdir -p dawn-generated/{include/{dawn,webgpu},src/{dawn,emdawnwebgpu},webgpu-headers}
-          for dir in include dawn gen/include; do
-            cp -r dawn-source/build-${{ matrix.platform }}/gen/$dir/* dawn-generated/include/dawn/ 2>/dev/null || true
-          done
+          cp -r dawn-source/build-${{ matrix.platform }}/gen/include/dawn/* dawn-generated/include/dawn/ 2>/dev/null || true
           cp -r dawn-source/build-${{ matrix.platform }}/gen/include/webgpu/* dawn-generated/include/webgpu/ 2>/dev/null || true
           cp -r dawn-source/build-${{ matrix.platform }}/gen/src/dawn/* dawn-generated/src/dawn/ 2>/dev/null || true
           cp -r dawn-source/build-${{ matrix.platform }}/gen/src/emdawnwebgpu/* dawn-generated/src/emdawnwebgpu/ 2>/dev/null || true
           cp -r dawn-source/build-${{ matrix.platform }}/gen/webgpu-headers/* dawn-generated/webgpu-headers/ 2>/dev/null || true
 
-      - name: Package Skia + Dawn
+      - name: Package Skia + Dawn directory structure
         run: |
-          # 目录结构
           mkdir -p Skia/{include/{core,dawn,modules},lib/${{ matrix.target_os }}/${{ matrix.arch }},bin/${{ matrix.target_os }}/${{ matrix.arch }}}
           cp -r skia-build/skia/include/* Skia/include/core/
           cp -r skia-build/skia/modules/* Skia/include/modules/ 2>/dev/null || true
@@ -218,88 +214,23 @@ jobs:
 
           if [ "${{ matrix.target_os }}" = "win" ]; then
             find skia-build/skia/out/Release -name "*.{lib,dll}" -exec cp {} Skia/{lib,bin}/${{ matrix.target_os }}/${{ matrix.arch }}/ \; 2>/dev/null
-            find dawn-source/build-${{ matrix.platform }}/${{ BUILD_TYPE }} -name "*.{lib,dll}" -exec cp {} Skia/{lib,bin}/${{ matrix.target_os }}/${{ matrix.arch }}/ \; 2>/dev/null
+            find dawn-source/build-${{ matrix.platform }}/${{ env.BUILD_TYPE }} -name "*.{lib,dll}" -exec cp {} Skia/{lib,bin}/${{ matrix.target_os }}/${{ matrix.arch }}/ \; 2>/dev/null
           else
             find skia-build/skia/out/Release -name "*.{a,so}" -exec cp {} Skia/lib/${{ matrix.target_os }}/${{ matrix.arch }}/ \; 2>/dev/null
             find dawn-source/build-${{ matrix.platform }} -name "*.{a,so}" -exec cp {} Skia/lib/${{ matrix.target_os }}/${{ matrix.arch }}/ \; 2>/dev/null
           fi
 
-      - name: Create CMake files
+      - name: Create ZIP package
         run: |
-          cat > Skia/CMakeLists.txt << 'EOF'
-          cmake_minimum_required(VERSION 3.20)
-          project(SkiaDawnPrebuilt VERSION 1.0.0 LANGUAGES CXX C)
-          set(CMAKE_CXX_STANDARD 20)
-          get_filename_component(SKIA_ROOT_DIR "${CMAKE_CURRENT_LIST_DIR}" ABSOLUTE)
-          if(WIN32)
-            set(PLATFORM_DIR "win")
-            if(CMAKE_SIZEOF_VOID_P EQUAL 8) set(ARCH_DIR "x64") else() set(ARCH_DIR "x86") endif()
-          elseif(ANDROID)
-            set(PLATFORM_DIR "android")
-            if(CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a") set(ARCH_DIR "arm64") else() set(ARCH_DIR "x64") endif()
-          else()
-            set(PLATFORM_DIR "linux")
-            if(CMAKE_SIZEOF_VOID_P EQUAL 8) set(ARCH_DIR "x64") else() set(ARCH_DIR "x86") endif()
-          endif()
-          set(LIB_DIR "${SKIA_ROOT_DIR}/lib/${PLATFORM_DIR}/${ARCH_DIR}")
-          set(BIN_DIR "${SKIA_ROOT_DIR}/bin/${PLATFORM_DIR}/${ARCH_DIR}")
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            powershell -Command "Compress-Archive -Path Skia\\* -DestinationPath ${{ matrix.platform }}.zip"
+          else
+            zip -r "${{ matrix.platform }}.zip" Skia/
+          fi
 
-          add_library(DawnDynamic INTERFACE)
-          target_include_directories(DawnDynamic INTERFACE
-            $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/include/dawn>
-            $<INSTALL_INTERFACE:include/dawn>
-          )
-          file(GLOB DAWN_LIBS "${LIB_DIR}/*dawn*.a" "${LIB_DIR}/*dawn*.lib" "${LIB_DIR}/*webgpu*.a" "${LIB_DIR}/*webgpu*.lib")
-          target_link_libraries(DawnDynamic INTERFACE ${DAWN_LIBS})
-
-          add_library(Skia INTERFACE)
-          add_library(skia::skia ALIAS Skia)
-          target_include_directories(Skia INTERFACE
-            $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/include/core>
-            $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/include/dawn>
-            $<BUILD_INTERFACE:${SKIA_ROOT_DIR}/include/modules>
-            $<INSTALL_INTERFACE:include>
-          )
-          file(GLOB SKIA_LIBS "${LIB_DIR}/*skia*.a" "${LIB_DIR}/*skia*.lib")
-          target_link_libraries(Skia INTERFACE ${SKIA_LIBS} DawnDynamic)
-
-          if(WIN32)
-            target_link_libraries(Skia INTERFACE d3d11 d3d12 dxgi dxguid d3dcompiler opengl32 vulkan-1 gdi32 user32 kernel32 ole32 oleaut32 uuid advapi32 shell32 usp10 ws2_32)
-            target_compile_definitions(Skia INTERFACE SK_GANESH=1 SK_VULKAN=1 SK_GL=1 SK_DIRECT3D=1 SK_DAWN=1 WIN32_LEAN_AND_MEAN NOMINMAX)
-          elseif(ANDROID)
-            target_link_libraries(Skia INTERFACE GLESv2 EGL vulkan android log jnigraphics mediandk dl m z)
-            target_compile_definitions(Skia INTERFACE ANDROID SK_GANESH=1 SK_VULKAN=1 SK_GL=1 SK_DAWN=1 __ANDROID_API__=21)
-          else()
-            target_link_libraries(Skia INTERFACE GL vulkan X11 Xrandr Xinerama Xcursor Xi pthread dl m)
-            target_compile_definitions(Skia INTERFACE SK_GANESH=1 SK_VULKAN=1 SK_GL=1 SK_DAWN=1)
-          endif()
-
-          export(TARGETS Skia DawnDynamic FILE SkiaTargets.cmake)
-          EOF
-
-          cat > Skia/SkiaConfig.cmake << 'EOF'
-          include(CMakeFindDependencyMacro)
-          include("${CMAKE_CURRENT_LIST_DIR}/SkiaTargets.cmake")
-          set(Skia_FOUND TRUE)
-          set(Skia_VERSION "1.0.0")
-          EOF
-
-          cat > Skia/SkiaConfigVersion.cmake << 'EOF'
-          set(PACKAGE_VERSION "1.0.0")
-          if(PACKAGE_VERSION VERSION_LESS PACKAGE_FIND_VERSION)
-            set(PACKAGE_VERSION_COMPATIBLE FALSE)
-          else()
-            set(PACKAGE_VERSION_COMPATIBLE TRUE)
-            if(PACKAGE_VERSION VERSION_EQUAL PACKAGE_FIND_VERSION)
-              set(PACKAGE_VERSION_EXACT TRUE)
-            endif()
-          endif()
-          EOF
-
-      - name: Zip & Upload
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.platform }}
-          path: |
-            ${{ matrix.platform }}.zip
+          path: ${{ matrix.platform }}.zip
           retention-days: 30
