@@ -7,8 +7,7 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
   schedule:
-    # 每天 UTC 00:00（北京时间 08:00）触发
-    - cron: '0 0 * * *'
+    - cron: '0 0 * * *'  # 每天 UTC 00:00（北京时间 08:00）
 
 permissions:
   contents: write
@@ -80,7 +79,7 @@ jobs:
         run: |
           choco install ninja -y
           choco install llvm --version=18.1.8 --force -y
-          echo "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8
 
       - name: Setup MSBuild
         if: runner.os == 'Windows'
@@ -92,31 +91,44 @@ jobs:
         with:
           ndk-version: r26d
 
-      - name: Fetch depot_tools
+      - name: Fetch depot_tools (Linux & macOS)
+        if: runner.os != 'Windows'
+        shell: bash
         run: |
           git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
           echo "${{ github.workspace }}/depot_tools" >> $GITHUB_PATH
 
-      - name: Prepare depot_tools on Windows
+      - name: Fetch depot_tools (Windows via Bash)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+          echo "${{ github.workspace }}/depot_tools" >> $GITHUB_PATH
+
+      - name: Prepare depot_tools on Windows (PowerShell)
         if: runner.os == 'Windows'
         run: |
+          Write-Host "Adding depot_tools to PATH for PowerShell steps"
           echo "${{ github.workspace }}\depot_tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8
           echo "DEPOT_TOOLS_WIN_TOOLCHAIN=0" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8
 
       - name: Fetch Skia
+        shell: bash
         run: |
-          export PATH=${{ github.workspace }}/depot_tools:$PATH
+          export PATH="${{ github.workspace }}/depot_tools:$PATH"
           mkdir skia-build && cd skia-build
           gclient config --name skia https://skia.googlesource.com/skia.git
           gclient sync
 
       - name: Fetch Dawn
+        shell: bash
         run: |
           git clone --recursive https://dawn.googlesource.com/dawn.git dawn-source
           cd dawn-source
           python3 tools/fetch_dawn_dependencies.py
 
       - name: Configure Dawn
+        shell: bash
         run: |
           cd dawn-source
           mkdir -p build-${{ matrix.platform }} && cd build-${{ matrix.platform }}
@@ -145,6 +157,7 @@ jobs:
           esac
 
       - name: Build Dawn
+        shell: bash
         run: |
           cd dawn-source/build-${{ matrix.platform }}
           if [ "${{ matrix.target_os }}" = "win" ]; then
@@ -155,78 +168,64 @@ jobs:
           echo "✅ Dawn 编译完成"
 
       - name: Configure Skia
+        shell: bash
         run: |
           cd skia-build/skia
-          export PATH=${{ github.workspace }}/depot_tools:$PATH
+          export PATH="${{ github.workspace }}/depot_tools:$PATH"
           python3 tools/git-sync-deps
           args="is_official_build=false is_debug=false extra_cflags=[\"-O2\",\"-g\"]"
           args="$args skia_use_dawn=true skia_dawn_dir=\"../../dawn-source\""
-          args="$args skia_use_system_expat=false skia_use_system_icu=false skia_use_system_libjpeg_turbo=false"
-          args="$args skia_use_system_libpng=false skia_use_system_libwebp=false skia_use_system_zlib=false"
-          args="$args skia_enable_pdf=true skia_enable_skottie=true skia_enable_skshaper=true skia_enable_svg=true skia_use_icu=true"
-          args="$args skia_enable_gpu=true skia_use_gl=true skia_use_vulkan=true skia_enable_spirv_validation=false skia_enable_tools=false"
+          args="$args skia_enable_gpu=true skia_use_gl=true skia_use_vulkan=true"
+          args="$args skia_enable_pdf=true skia_enable_skottie=true skia_enable_svg=true"
           args="$args target_os=\"${{ matrix.target_os }}\" target_cpu=\"${{ matrix.arch }}\""
           case "${{ matrix.target_os }}" in
             win)
-              args="$args skia_use_angle=true skia_use_direct3d=true skia_use_freetype=true"
-              args="$args skia_use_system_freetype2=false skia_use_harfbuzz=true skia_use_system_harfbuzz=false"
-              args="$args cc=\"clang\" cxx=\"clang++\" clang_win=\"C:/Program Files/LLVM\""
+              args="$args skia_use_angle=true skia_use_direct3d=true"
               ;;
             linux)
-              args="$args skia_use_x11=true skia_use_freetype=true skia_use_fontconfig=true skia_use_harfbuzz=true"
-              args="$args cc=\"clang-18\" cxx=\"clang++-18\""
+              args="$args skia_use_x11=true skia_use_fontconfig=true"
               ;;
             android)
               args="$args ndk=\"$ANDROID_NDK_HOME\" android_api_level=${{ matrix.android_api }}"
-              args="$args skia_use_system_freetype2=false skia_use_freetype=true skia_enable_fontmgr_android=true"
               ;;
           esac
           echo "BUILD_ARGS=$args" >> $GITHUB_ENV
 
       - name: GN Generate Skia
+        shell: bash
         run: |
           cd skia-build/skia
-          export PATH=${{ github.workspace }}/depot_tools:$PATH
           bin/gn gen out/Release --args="$BUILD_ARGS"
 
       - name: Build Skia
+        shell: bash
         run: |
           cd skia-build/skia
           ninja -C out/Release -j4
           echo "✅ Skia 编译完成"
 
-      - name: Collect Dawn generated files
+      - name: Package Skia + Dawn
+        shell: bash
         run: |
-          mkdir -p dawn-generated/{include/{dawn,webgpu},src/{dawn,emdawnwebgpu},webgpu-headers}
-          cp -r dawn-source/build-${{ matrix.platform }}/gen/include/dawn/* dawn-generated/include/dawn/ 2>/dev/null || true
-          cp -r dawn-source/build-${{ matrix.platform }}/gen/include/webgpu/* dawn-generated/include/webgpu/ 2>/dev/null || true
-          cp -r dawn-source/build-${{ matrix.platform }}/gen/src/dawn/* dawn-generated/src/dawn/ 2>/dev/null || true
-          cp -r dawn-source/build-${{ matrix.platform }}/gen/src/emdawnwebgpu/* dawn-generated/src/emdawnwebgpu/ 2>/dev/null || true
-          cp -r dawn-source/build-${{ matrix.platform }}/gen/webgpu-headers/* dawn-generated/webgpu-headers/ 2>/dev/null || true
-
-      - name: Package Skia + Dawn directory structure
-        run: |
-          mkdir -p Skia/{include/{core,dawn,modules},lib/${{ matrix.target_os }}/${{ matrix.arch }},bin/${{ matrix.target_os }}/${{ matrix.arch }}}
+          mkdir -p Skia/{include/{core,dawn,modules},lib/${{ matrix.target_os }}/${{ matrix.arch }}}
           cp -r skia-build/skia/include/* Skia/include/core/
-          cp -r skia-build/skia/modules/* Skia/include/modules/ 2>/dev/null || true
-          cp -r dawn-source/include/* Skia/include/dawn/ 2>/dev/null || true
-          cp -r dawn-generated/include/* Skia/include/dawn/ 2>/dev/null || true
-
+          cp -r dawn-source/include/* Skia/include/dawn/ || true
           if [ "${{ matrix.target_os }}" = "win" ]; then
-            find skia-build/skia/out/Release -name "*.{lib,dll}" -exec cp {} Skia/{lib,bin}/${{ matrix.target_os }}/${{ matrix.arch }}/ \; 2>/dev/null
-            find dawn-source/build-${{ matrix.platform }}/${{ env.BUILD_TYPE }} -name "*.{lib,dll}" -exec cp {} Skia/{lib,bin}/${{ matrix.target_os }}/${{ matrix.arch }}/ \; 2>/dev/null
+            find skia-build/skia/out/Release -name "*.{lib,dll}" -exec cp {} Skia/lib/${{ matrix.target_os }}/${{ matrix.arch }}/ \;
           else
-            find skia-build/skia/out/Release -name "*.{a,so}" -exec cp {} Skia/lib/${{ matrix.target_os }}/${{ matrix.arch }}/ \; 2>/dev/null
-            find dawn-source/build-${{ matrix.platform }} -name "*.{a,so}" -exec cp {} Skia/lib/${{ matrix.target_os }}/${{ matrix.arch }}/ \; 2>/dev/null
+            find skia-build/skia/out/Release -name "*.{a,so}" -exec cp {} Skia/lib/${{ matrix.target_os }}/${{ matrix.arch }}/ \;
           fi
 
       - name: Create ZIP package
+        if: runner.os == 'Windows'
+        shell: powershell
         run: |
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            powershell -Command "Compress-Archive -Path Skia\\* -DestinationPath ${{ matrix.platform }}.zip"
-          else
-            zip -r "${{ matrix.platform }}.zip" Skia/
-          fi
+          Compress-Archive -Path Skia\* -DestinationPath "${{ matrix.platform }}.zip"
+      - name: Create ZIP package (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          zip -r "${{ matrix.platform }}.zip" Skia/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
